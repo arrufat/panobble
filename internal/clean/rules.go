@@ -1,5 +1,5 @@
-// Package clean is the metadata cleanup pipeline, a port of pano-scrobbler's
-// sanitize + regex presets + YouTube title parsing + user regex edits.
+// Package clean is the metadata cleanup pipeline: sanitize, regex presets,
+// YouTube title parsing, and user regex edits.
 package clean
 
 import (
@@ -31,8 +31,7 @@ func (r filterRule) compile() compiledRule {
 	return compiledRule{re: regexp.MustCompile(p), replacement: r.Replacement, global: r.Global}
 }
 
-// apply runs the rule: replace-all when global, replace-first otherwise
-// (Kotlin Regex.replaceFirst semantics; RE2 has no ReplaceFirst).
+// apply runs the rule: replace-all when global, replace-first otherwise.
 func (c compiledRule) apply(s string) string {
 	if c.global {
 		return c.re.ReplaceAllString(s, c.replacement)
@@ -40,6 +39,8 @@ func (c compiledRule) apply(s string) string {
 	return replaceFirst(c.re, s, c.replacement)
 }
 
+// replaceFirst replaces the first match with group expansion (RE2 has no
+// built-in ReplaceFirst).
 func replaceFirst(re *regexp.Regexp, s, replacement string) string {
 	loc := re.FindStringSubmatchIndex(s)
 	if loc == nil {
@@ -108,7 +109,7 @@ func init() {
 	}
 	mustUnmarshal(rules.YoutubePrecleaners, &pc)
 	for _, r := range pc.Rules {
-		r.Global = true // Kotlin String.replace(Regex, ...) replaces all
+		r.Global = true // precleaners always replace all occurrences
 		precleaners = append(precleaners, r.compile())
 	}
 

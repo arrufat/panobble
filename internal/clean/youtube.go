@@ -3,7 +3,6 @@ package clean
 import "strings"
 
 // ParseYoutubeTitle extracts (artist, track) from a YouTube video title.
-// Port of pano's MetadataUtils.parseYoutubeTitle (from web-scrobbler).
 // Empty strings mean "not found".
 func ParseYoutubeTitle(videoTitle string) (artist, track string) {
 	if videoTitle == "" {
@@ -64,7 +63,7 @@ func cleanYoutubeArtist(artist string) string {
 }
 
 // splitString splits at the first occurrence of the highest-priority
-// separator (port of pano's splitString/findSeparator).
+// separator.
 func splitString(s string) (first, second string) {
 	if s == "" {
 		return "", ""
@@ -77,8 +76,7 @@ func splitString(s string) (first, second string) {
 	return "", ""
 }
 
-// SanitizeAlbum ports MetadataUtils.sanitizeAlbum: "unknown"-style
-// placeholders become empty.
+// SanitizeAlbum turns "unknown"-style placeholders into empty.
 func SanitizeAlbum(album string) string {
 	if metaUnknown[strings.ToLower(album)] {
 		return ""
@@ -86,7 +84,7 @@ func SanitizeAlbum(album string) string {
 	return album
 }
 
-// SanitizeArtist ports MetadataUtils.sanitizeArtist.
+// SanitizeArtist drops known spam artist values.
 func SanitizeArtist(artist string) string {
 	if artistSpam[strings.ToLower(artist)] {
 		return ""
@@ -94,7 +92,8 @@ func SanitizeArtist(artist string) string {
 	return artist
 }
 
-// SanitizeAlbumArtist ports MetadataUtils.sanitizeAlbumArtist.
+// SanitizeAlbumArtist sanitizes placeholders and canonicalizes "VA" to
+// "Various Artists".
 func SanitizeAlbumArtist(albumArtist string) string {
 	a := SanitizeAlbum(albumArtist)
 	if strings.EqualFold(a, "VA") {

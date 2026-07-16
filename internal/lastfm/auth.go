@@ -40,7 +40,7 @@ func (c *Client) AuthURL(token string) string {
 
 // PollSession polls auth.getSession until the user authorizes the token in
 // the browser: every 5s for up to 2 minutes, retrying while the API returns
-// code 14 ("token not authorized") — pano's OOB login loop.
+// code 14 ("token not authorized").
 func (c *Client) PollSession(ctx context.Context, token string) (Session, error) {
 	deadline := time.Now().Add(2 * time.Minute)
 	for {

@@ -33,9 +33,8 @@ func NewPipeline(cfg config.Cleanup, rules []config.Rule) (*Pipeline, error) {
 	}, nil
 }
 
-// Clean runs the full pipeline, a port of pano's preprocessMetadata:
-// sanitize → user rules → presets → (if only presets changed) user rules
-// again over the presets' output.
+// Clean runs the full pipeline: sanitize → user rules → presets → (if only
+// presets changed) user rules again over the presets' output.
 func (p *Pipeline) Clean(t scrobble.Track, host string) (scrobble.Track, Result) {
 	t.Artist = SanitizeArtist(t.Artist)
 	t.Album = SanitizeAlbum(t.Album)
@@ -64,9 +63,8 @@ func (p *Pipeline) Clean(t scrobble.Track, host string) (scrobble.Track, Result)
 		}
 	}
 
-	// Deviation from pano: trim the final fields. Pano can leave edge
-	// whitespace behind (e.g. the 🅴 edge trim keeps the adjacent space and
-	// would submit "Song ").
+	// Trim edge whitespace the edits can leave behind (e.g. the 🅴 edge trim
+	// keeps the adjacent space).
 	t.Artist = strings.TrimSpace(t.Artist)
 	t.Title = strings.TrimSpace(t.Title)
 	t.Album = strings.TrimSpace(t.Album)

@@ -36,7 +36,7 @@ type Cleanup struct {
 	ParseTitleApps []string `toml:"parse_title_apps"`
 }
 
-// Rule is a user-defined regex edit, a port of pano-scrobbler's RegexEdit.
+// Rule is a user-defined regex edit.
 type Rule struct {
 	Name             string            `toml:"name"`
 	Search           map[string]string `toml:"search"`      // field -> pattern; fields: track, artist, album, albumArtist
@@ -57,7 +57,6 @@ type Config struct {
 	Rules    []Rule   `toml:"rule"`
 }
 
-// Defaults mirror pano-scrobbler's MainPrefs defaults.
 func Default() Config {
 	return Config{
 		Scrobble: Scrobble{
@@ -134,7 +133,7 @@ func LoadFrom(path string) (Config, error) {
 	return cfg, nil
 }
 
-// clamp applies pano's pref bounds.
+// clamp bounds the scrobble timing settings.
 func (c *Config) clamp() {
 	c.Scrobble.DelayPercent = clamp(c.Scrobble.DelayPercent, 30, 95)
 	c.Scrobble.DelayMaxSecs = clamp(c.Scrobble.DelayMaxSecs, 30, 360)

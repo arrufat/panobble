@@ -1,5 +1,5 @@
 // Package lastfm is a minimal Last.fm API client covering auth, now-playing
-// and scrobbling. Protocol details ported from pano-scrobbler's Lastfm.kt.
+// and scrobbling.
 package lastfm
 
 import (
@@ -45,9 +45,8 @@ func NewClient(apiKey, apiSecret string) *Client {
 	}
 }
 
-// sign computes api_sig (port of pano's toFormParametersWithSig): drop empty
-// values and the format param, sort keys case-sensitively, concatenate
-// key+value, append the secret, md5 hex.
+// sign computes api_sig: drop empty values and the format param, sort keys
+// case-sensitively, concatenate key+value, append the secret, md5 hex.
 func (c *Client) sign(params map[string]string) string {
 	keys := make([]string, 0, len(params))
 	for k, v := range params {

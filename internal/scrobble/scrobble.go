@@ -20,8 +20,7 @@ type Track struct {
 	AppID       string        `json:"appId,omitempty"`    // normalized; not submitted
 }
 
-// SafeDuration ports pano's ScrobbleData.safeDuration: report the duration
-// only when it is plausible (30s to 1h).
+// SafeDuration reports the duration only when it is plausible (30s to 1h).
 func (t Track) SafeDuration() (time.Duration, bool) {
 	if t.Duration >= 30*time.Second && t.Duration <= time.Hour {
 		return t.Duration, true
@@ -47,7 +46,7 @@ type APIError struct {
 func (e *APIError) Error() string { return e.Message }
 
 // Retryable reports whether the scrobble may succeed later and should be
-// queued (port of pano's isNetworkRetryable + rate limits).
+// queued.
 func Retryable(err error) bool {
 	var netErr net.Error
 	if errors.As(err, &netErr) {

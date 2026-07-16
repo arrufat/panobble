@@ -8,7 +8,6 @@ import (
 	"github.com/arrufat/panobble/internal/scrobble"
 )
 
-// Host constants (pano Stuff.kt).
 const (
 	hostYoutube      = "youtube.com"
 	hostYoutubeMusic = "music.youtube.com"
@@ -16,11 +15,10 @@ const (
 
 const topicSuffix = "- Topic"
 
-// applyPresets ports RegexPresets.applyAllPresets. Preset order is pano's
-// enum order: parse_title, parse_title_with_fallback, then the regex presets.
-// dataIsEdited skips the parse_title presets (pano's applyOncePresets rule).
-// Returns the possibly-changed track, whether anything changed, and whether
-// a strict title parse failed (⇒ the scrobble should be skipped).
+// applyPresets applies the enabled presets in order: parse_title,
+// parse_title_with_fallback, then the regex presets. dataIsEdited skips the
+// parse_title presets. Returns the possibly-changed track, whether anything
+// changed, and whether a strict title parse failed (⇒ skip the scrobble).
 func (p *Pipeline) applyPresets(t scrobble.Track, host string, dataIsEdited bool) (scrobble.Track, bool, bool) {
 	changed := false
 
@@ -57,10 +55,9 @@ func (p *Pipeline) applyPresets(t scrobble.Track, host string, dataIsEdited bool
 	return t, changed, false
 }
 
-// applyParseTitle ports the parse_title / parse_title_with_fallback branch of
-// RegexPresets.applyPreset. The strict variant (parse_title, plain youtube.com)
-// reports failure when the title cannot be parsed; pano throws
-// TitleParseException there and the scrobble is skipped.
+// applyParseTitle handles the parse_title / parse_title_with_fallback
+// presets. The strict variant (parse_title, plain youtube.com) reports
+// failure when the title cannot be parsed, which skips the scrobble.
 func (p *Pipeline) applyParseTitle(t scrobble.Track, host, presetName string) (out scrobble.Track, changed, parseFailed bool) {
 	strict := presetName == "parse_title"
 
@@ -129,9 +126,8 @@ func applyRegexPreset(t scrobble.Track, preset compiledPreset) (scrobble.Track, 
 	return t, changed
 }
 
-// removeEdgeSymbol ports RegexPresets.removeEdgeSymbol: removes symbol when
-// it occurs exactly once, at the start (followed by whitespace) or at the
-// end (preceded by whitespace).
+// removeEdgeSymbol removes symbol when it occurs exactly once, at the start
+// (followed by whitespace) or at the end (preceded by whitespace).
 func removeEdgeSymbol(input, symbol string) (string, bool) {
 	first := strings.Index(input, symbol)
 	last := strings.LastIndex(input, symbol)

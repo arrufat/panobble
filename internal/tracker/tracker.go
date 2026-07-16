@@ -1,7 +1,6 @@
 // Package tracker is the scrobbling state machine: it consumes normalized
-// MPRIS events and decides when to send now-playing and scrobbles.
-// It ports pano-scrobbler's MediaListener/SessionTracker/ScrobbleQueue trio
-// into a single event loop that owns all mutable state.
+// MPRIS events and decides when to send now-playing and scrobbles. A single
+// event loop owns all mutable state.
 package tracker
 
 import (
@@ -16,7 +15,6 @@ import (
 	"github.com/arrufat/panobble/internal/scrobble"
 )
 
-// Constants from pano (MediaListener, ScrobbleQueue, Stuff).
 const (
 	metaWait      = 1 * time.Second         // debounce before cleanup + now-playing
 	startPosLimit = 1500 * time.Millisecond // "position is at track start" threshold
@@ -113,9 +111,7 @@ func (tr *Tracker) handleMprisEvent(ev mpris.Event) {
 		tr.playbackStateChanged(p, *ev.Status, ev.Position, ev.CanGoNext)
 
 	case ev.SeekedTo != nil:
-		// A seek to the very start is a replay: allow rescrobbling by
-		// resetting played time (pano handles this via position on the next
-		// status event; the explicit signal makes it deterministic here).
+		// A seek back to the start is a replay: allow rescrobbling.
 		if *ev.SeekedTo < tr.startPosLimit && p.isPlaying &&
 			p.scrobbled >= stateScrobbleSubmitted {
 			p.timePlayed = 0
@@ -126,7 +122,6 @@ func (tr *Tracker) handleMprisEvent(ev mpris.Event) {
 	}
 }
 
-// metadataChanged ports MediaListener.SessionTracker.metadataChanged.
 func (tr *Tracker) metadataChanged(p *player, md mpris.Metadata) {
 	sameAsOld := md.Artist == p.md.Artist && md.Title == p.md.Title &&
 		md.Album == p.md.Album && md.AlbumArtist == p.md.AlbumArtist
@@ -143,8 +138,6 @@ func (tr *Tracker) metadataChanged(p *player, md mpris.Metadata) {
 			p.playStartTime = time.Time{}
 		}
 
-		// pano checks scrobbleQueue.has(newHash): is a scrobble already
-		// pending for this exact track?
 		armedForThis := p.scrobbleTimer != nil && p.lastScrobbleHash == p.hash
 
 		switch {
@@ -160,8 +153,8 @@ func (tr *Tracker) metadataChanged(p *player, md mpris.Metadata) {
 	p.lastDuration = md.Duration
 }
 
-// shouldIgnore ports the cancel conditions: empty artist/title, blocked
-// hostname, Spotify ad, and the require-album heuristic (pano #975).
+// shouldIgnore reports tracks that must never scrobble: empty artist/title,
+// blocked hostname, Spotify ad, or a missing album when require_album is on.
 func (tr *Tracker) shouldIgnore(p *player, md mpris.Metadata) bool {
 	if md.Artist == "" || md.Title == "" {
 		return true
@@ -181,7 +174,6 @@ func (tr *Tracker) shouldIgnore(p *player, md mpris.Metadata) bool {
 	return false
 }
 
-// playbackStateChanged ports MediaListener.SessionTracker.playbackStateChanged.
 func (tr *Tracker) playbackStateChanged(p *player, status mpris.PlaybackStatus, position time.Duration, canGoNext bool) {
 	// Desktop quirk: drop state=Playing pos=0 events while duration unknown.
 	if p.lastDuration <= 0 && p.isPlaying &&
@@ -236,8 +228,8 @@ func (tr *Tracker) playbackStateChanged(p *player, status mpris.PlaybackStatus, 
 	p.lastPlayback = status
 }
 
-// pause ports SessionTracker.pause: accumulate played time if a scrobble was
-// pending, cancel the timers.
+// pause accumulates played time if a scrobble was pending and cancels the
+// timers.
 func (tr *Tracker) pause(p *player) {
 	if p.lastPlayback == mpris.StatusPlaying {
 		if p.scrobbleTimer != nil && p.hash == p.lastScrobbleHash && !p.playStartTime.IsZero() {
@@ -250,19 +242,17 @@ func (tr *Tracker) pause(p *player) {
 	p.stopTimers()
 }
 
-// cancel marks the current track as never-to-scrobble. Unlike pano (which
-// zeroes the playback state and relies on its native layer's constant stream
-// of playback events to recover), lastPlayback is kept: players like Chromium
-// publish metadata incrementally, and when a later update completes the track
-// (e.g. the album arrives after a require_album ignore), metadataChanged must
-// still see Playing to arm the now-valid track.
+// cancel marks the current track as never-to-scrobble. lastPlayback is kept:
+// players like Chromium publish metadata incrementally, and a later update
+// that completes the track (e.g. the album arriving after a require_album
+// ignore) must still see Playing to arm.
 func (tr *Tracker) cancel(p *player) {
 	p.scrobbled = stateCancelled
 	p.stopTimers()
 }
 
-// arm ports ScrobbleQueue.scrobble: prepare, debounce metaWait, then clean +
-// now-playing, and fire the scrobble at the computed delay.
+// arm schedules the track: debounce metaWait, then clean + now-playing, and
+// fire the scrobble at the computed delay.
 func (tr *Tracker) arm(p *player) {
 	if p.md.Title == "" {
 		return
@@ -349,8 +339,8 @@ func (tr *Tracker) handleTimerEvent(te timerEvent) {
 	}
 }
 
-// shouldSendNowPlaying ports ScrobbleQueue's resend suppression: skip when
-// the same track resumed recently (within min(duration*3/4, 4min)).
+// shouldSendNowPlaying suppresses the resend when the same track resumed
+// recently (within min(duration*3/4, 4min)).
 func (tr *Tracker) shouldSendNowPlaying(p *player) bool {
 	if p.npSentHash != p.hash || p.npSentAt.IsZero() {
 		return true

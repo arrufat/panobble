@@ -227,7 +227,8 @@ func (w *Watcher) handleSignal(sig *dbus.Signal) {
 		changed, _ := sig.Body[1].(map[string]dbus.Variant)
 		appID := NormalizeAppID(busName)
 
-		// Metadata first, then playback status (pano's ordering).
+		// Metadata first, then playback status; the tracker relies on this
+		// ordering.
 		if v, ok := changed["Metadata"]; ok {
 			if m, ok := v.Value().(map[string]dbus.Variant); ok {
 				md := metadataFromMap(m)

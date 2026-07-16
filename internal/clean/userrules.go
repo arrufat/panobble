@@ -10,7 +10,7 @@ import (
 
 var ruleFields = []string{"track", "album", "artist", "albumArtist"}
 
-// userRule is a compiled config.Rule (pano RegexEdit port).
+// userRule is a compiled config.Rule.
 type userRule struct {
 	name             string
 	search           map[string]*regexp.Regexp // field -> pattern (non-empty only)
@@ -60,11 +60,10 @@ func compileUserRules(rules []config.Rule) ([]userRule, error) {
 	return out, nil
 }
 
-// applyUserRules ports RegexEditsDao.performRegexReplace (Replace and Block
-// modes; Extract is not supported). Returns the possibly-changed track,
-// whether any rule matched, the name of a blocking rule ("" if none), and
-// whether a matched rule had continue_matching = false (which also stops
-// presets from running, as in pano's performEditsAndBlocks).
+// applyUserRules applies the configured rules in order. Returns the
+// possibly-changed track, whether any rule matched, the name of a blocking
+// rule ("" if none), and whether a matched rule had continue_matching =
+// false (which also stops presets from running).
 func (p *Pipeline) applyUserRules(t scrobble.Track, host string) (scrobble.Track, bool, string, bool) {
 	changed := false
 	stopped := false
@@ -78,7 +77,7 @@ func (p *Pipeline) applyUserRules(t scrobble.Track, host string) (scrobble.Track
 			continue
 		}
 
-		// All non-empty patterns must match their field (pano semantics).
+		// All non-empty patterns must match their field.
 		allMatched := true
 		for field, re := range rule.search {
 			if !re.MatchString(*fieldValue(&t, field)) {
@@ -104,7 +103,7 @@ func (p *Pipeline) applyUserRules(t scrobble.Track, host string) (scrobble.Track
 				*val = replaceFirst(re, *val, repl)
 			}
 		}
-		// pano discards a replacement that empties track or artist.
+		// A replacement that empties track or artist is discarded.
 		if nt.Title != "" && nt.Artist != "" {
 			t = nt
 			changed = true

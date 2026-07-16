@@ -22,7 +22,6 @@ type Pending struct {
 	CanForceRetry bool           `json:"canForceRetry"` // network-retryable failure
 }
 
-// Queue semantics ported from pano's PendingScrobblesWorker.
 const (
 	batchSize    = 50
 	hardLimit    = 700
@@ -111,9 +110,9 @@ func readEntries(f *os.File) ([]Pending, error) {
 }
 
 // Flush submits eligible queued scrobbles: oldest first, batches of 50,
-// at most 700 per run, aborting after the first failed batch (pano's
-// MAX_FAILURES_PER_SERVICE=1). Entries older than 14 days or terminally
-// rejected are dropped. Survivors are rewritten atomically.
+// at most 700 per run, aborting after the first failed batch. Entries older
+// than 14 days or terminally rejected are dropped. Survivors are rewritten
+// atomically.
 func (q *Queue) Flush(ctx context.Context, s scrobble.Scrobbler) error {
 	all, err := q.list()
 	if err != nil {

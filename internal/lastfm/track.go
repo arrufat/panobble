@@ -14,7 +14,7 @@ var _ scrobble.Scrobbler = (*Client)(nil)
 func (c *Client) Name() string { return "lastfm" }
 
 // NowPlaying submits track.updateNowPlaying. An "ignored" response counts as
-// success (matching pano).
+// success.
 func (c *Client) NowPlaying(ctx context.Context, t scrobble.Track) error {
 	params := map[string]string{
 		"method":  "track.updateNowPlaying",
@@ -69,8 +69,8 @@ func (c *Client) Scrobble(ctx context.Context, ts []scrobble.Track) error {
 		} `json:"scrobbles"`
 	}
 	return c.post(ctx, params, &resp)
-	// resp.Scrobbles.Attr.Ignored > 0 means some were ignored; like pano, we
-	// treat that as success and do not requeue.
+	// resp.Scrobbles.Attr.Ignored > 0 means some were ignored; treated as
+	// success, not requeued.
 }
 
 // trackParams fills the track fields; i == -1 means unindexed (single form).

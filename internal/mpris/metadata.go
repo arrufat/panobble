@@ -21,7 +21,7 @@ func init() {
 	}
 }
 
-// Metadata is the normalized per-track metadata, mirroring pano's MetadataInfo.
+// Metadata is the normalized per-track metadata.
 type Metadata struct {
 	Title       string
 	Artist      string
@@ -53,9 +53,8 @@ func ParsePlaybackStatus(s string) PlaybackStatus {
 	return StatusUnknown
 }
 
-// NormalizeAppID ports pano's DesktopStuff.normalizeAppId (Linux branch):
-// kdeconnect bus names collapse to one id, and chromium-style trailing
-// ".instanceNNN" segments are stripped.
+// NormalizeAppID collapses kdeconnect bus names to one id and strips
+// chromium-style trailing ".instanceNNN" segments.
 func NormalizeAppID(busName string) string {
 	if strings.HasPrefix(busName, kdeconnectBus) {
 		return kdeconnectBus
@@ -80,8 +79,7 @@ func MatchesApp(normalizedID string, entries []string) bool {
 }
 
 // NormalizeURLHost extracts and normalizes the hostname from xesam:url:
-// strip www., then collapse against the wildcard-domains list
-// (port of pano's MetadataTransforms.jvm.kt).
+// strip www., then collapse against the wildcard-domains list.
 func NormalizeURLHost(rawURL string) string {
 	if rawURL == "" {
 		return ""
@@ -125,7 +123,7 @@ func metadataFromMap(m map[string]dbus.Variant) Metadata {
 	return md
 }
 
-// IsSpotifyAd ports pano's metadata-based Spotify ad heuristic.
+// IsSpotifyAd detects Spotify ads by their metadata shape.
 func (md Metadata) IsSpotifyAd() bool {
 	return md.Title == "Advertisement" &&
 		md.Artist != "" &&

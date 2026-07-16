@@ -8,7 +8,7 @@ import (
 	"github.com/arrufat/panobble/internal/scrobble"
 )
 
-// scrobbledState ports pano's PlayingTrackInfo.ScrobbledState (collapsed).
+// scrobbledState is the per-track submission progress.
 type scrobbledState int
 
 const (
@@ -19,8 +19,8 @@ const (
 	stateCancelled
 )
 
-// player is the per-player tracker state: pano's SessionTracker +
-// PlayingTrackInfo merged. All fields are owned by the Tracker goroutine.
+// player is the per-player tracker state. All fields are owned by the
+// Tracker goroutine.
 type player struct {
 	busName string
 	appID   string
@@ -39,7 +39,7 @@ type player struct {
 	playStartTime time.Time     // zero = unset
 	timePlayed    time.Duration // accumulated across pauses
 
-	// now-playing resend suppression (pano ScrobbleQueue)
+	// now-playing resend suppression
 	npSentHash uint64
 	npSentAt   time.Time
 
@@ -82,8 +82,10 @@ func (p *player) stopTimers() {
 	}
 }
 
-// scrobbleDelay ports pano's SessionTracker.scrobble() delay formula.
-// unknownDelay is 30s and floor 2s in production (overridable in tests).
+// scrobbleDelay computes the time until submission: delayPercent% of the
+// duration, capped at delayMax, floored just under minDuration, minus time
+// already played. unknownDelay is 30s and floor 2s in production
+// (overridable in tests).
 func scrobbleDelay(duration, timePlayed time.Duration, delayPercent int,
 	delayMax, minDuration, unknownDelay, floor time.Duration) time.Duration {
 	var delay time.Duration
