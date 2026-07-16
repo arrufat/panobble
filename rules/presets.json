@@ -1,0 +1,31 @@
+{
+  "_source": "pano-scrobbler RegexPresets.kt. Regex presets apply replace-first per listed field, case-insensitively. Order matters and mirrors pano's enum order; the parse_title presets are implemented in code (see internal/clean/presets.go), gated on hosts youtube.com / music.youtube.com. hosts, when present, limits a preset to those URL hosts.",
+  "presets": [
+    {
+      "name": "remastered",
+      "fields": ["track", "album"],
+      "pattern": "^(.+) [(\\[\\/\\-][^()\\[\\]]*?re-?mastere?d?[^)\\[\\]]*?([)\\]\\-\\/]|$)",
+      "replacement": "$1"
+    },
+    {
+      "name": "single_ep",
+      "fields": ["album"],
+      "pattern": " - (Single|EP)$",
+      "replacement": "",
+      "hosts": ["music.apple.com"]
+    },
+    {
+      "name": "explicit",
+      "fields": ["track", "album"],
+      "pattern": "^(.*) (- |\\(|\\[|\\/)(explicit|clean)( .*?version| edit(ed)?)?[\\)\\]]?$",
+      "replacement": "$1",
+      "edge_symbol": "🅴"
+    },
+    {
+      "name": "album_ver",
+      "fields": ["track"],
+      "pattern": "^(.*) (- |\\(|\\[|\\/)(.+ )?album (.*?version|edit(ed)?).*?[\\)\\]]?$",
+      "replacement": "$1"
+    }
+  ]
+}

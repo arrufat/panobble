@@ -10,3 +10,21 @@ import _ "embed"
 
 //go:embed wildcard_domains.json
 var WildcardDomains []byte
+
+//go:embed separators.json
+var Separators []byte
+
+//go:embed placeholders.json
+var Placeholders []byte
+
+//go:embed youtube_precleaners.json
+var YoutubePrecleaners []byte
+
+//go:embed youtube_extractors.json
+var YoutubeExtractors []byte
+
+//go:embed youtube_filters.json
+var YoutubeFilters []byte
+
+//go:embed presets.json
+var Presets []byte

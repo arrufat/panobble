@@ -34,7 +34,7 @@ type Event struct {
 	Removed  bool            // player disappeared
 
 	// Position at the time of a status change, -1 if unavailable.
-	Position time.Duration
+	Position  time.Duration
 	CanGoNext bool
 }
 

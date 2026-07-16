@@ -1,0 +1,11 @@
+{
+  "_source": "pano-scrobbler MetadataUtils.kt ytTitleRegExps + the 【】 fallback. before_split patterns are tried in order (first unanchored match wins); if none match, the separator split runs; after_split patterns are the last resort before treating the whole title as the track.",
+  "before_split": [
+    { "_comment": "Artist \"Track\"", "pattern": "(.+?)([\\s:—-])+\\s*\"(.+?)\"", "artist_group": 1, "track_group": 3 },
+    { "_comment": "Artist「Track」", "pattern": "(.+?)[『｢「](.+?)[」｣』]", "artist_group": 1, "track_group": 2 },
+    { "_comment": "Track (... by Artist)", "pattern": "(\\w[\\s\\w]*?)\\s+\\([^)]*\\s*by\\s*([^)]+)+\\)", "artist_group": 2, "track_group": 1 }
+  ],
+  "after_split": [
+    { "_comment": "Artist【Track】", "pattern": "(.+?)【(.+?)】", "artist_group": 1, "track_group": 2 }
+  ]
+}

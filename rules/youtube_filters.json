@@ -1,0 +1,53 @@
+{
+  "_source": "pano-scrobbler MetadataUtils.kt filter rule tables (originally web-scrobbler metadata-filter). ci = case-insensitive; global = replace all occurrences, otherwise replace first. Stages run in the listed order. \\u escapes rewritten as RE2 \\x{...}.",
+  "stages": {
+    "youtube_track": [
+      { "pattern": "^\\s+|\\s+$", "replacement": "", "ci": false, "global": true },
+      { "_comment": "**NEW**", "pattern": "\\*+\\s?\\S+\\s?\\*+$", "replacement": "", "ci": false },
+      { "_comment": "[Whatever]", "pattern": "\\[[^\\]]+]", "replacement": "", "ci": false },
+      { "_comment": "【Whatever】", "pattern": "【[^】]+】", "replacement": "", "ci": false },
+      { "_comment": "（Whatever）", "pattern": "（[^）]+）", "replacement": "", "ci": false },
+      { "_comment": "(Whatever Version)", "pattern": "\\([^)]*version\\)$", "replacement": "", "ci": true },
+      { "_comment": "video extensions", "pattern": "\\.(avi|wmv|mpg|mpeg|flv)$", "replacement": "", "ci": true },
+      { "_comment": "(Lyrics Video)", "pattern": "\\(.*lyrics?\\s*(video)?\\)", "replacement": "", "ci": true },
+      { "_comment": "((Official)? (Track)? Stream)", "pattern": "\\((of+icial\\s*)?(track\\s*)?stream\\)", "replacement": "", "ci": true },
+      { "_comment": "((Official)? (Music|HD)? Video|Audio)", "pattern": "\\((of+icial\\s*)?((music|hd)\\s*)?(video|audio)\\)", "replacement": "", "ci": true },
+      { "_comment": "- (Official)? (Music)? Video|Audio", "pattern": "-\\s(of+icial\\s*)?(music\\s*)?(video|audio)$", "replacement": "", "ci": true },
+      { "_comment": "((Whatever)? Album Track)", "pattern": "\\(.*Album\\sTrack\\)", "replacement": "", "ci": true },
+      { "_comment": "(Official)", "pattern": "\\(\\s*of+icial\\s*\\)", "replacement": "", "ci": true },
+      { "_comment": "(1999)", "pattern": "\\(\\s*[0-9]{4}\\s*\\)", "replacement": "", "ci": true },
+      { "_comment": "(HD) / (HQ)", "pattern": "\\(\\s*(HD|HQ)\\s*\\)$", "replacement": "", "ci": false },
+      { "_comment": "HD / HQ", "pattern": "(HD|HQ)\\s?$", "replacement": "", "ci": false },
+      { "_comment": "video clip officiel/official", "pattern": "(vid[ée]o)?\\s?clip\\sof+ici[ae]l", "replacement": "", "ci": true },
+      { "_comment": "offizielles video", "pattern": "of+iziel+es\\s*video", "replacement": "", "ci": true },
+      { "_comment": "video clip", "pattern": "vid[ée]o\\s?clip", "replacement": "", "ci": true },
+      { "_comment": "clip", "pattern": "\\sclip", "replacement": "", "ci": true },
+      { "_comment": "full album", "pattern": "full\\s*album", "replacement": "", "ci": true },
+      { "_comment": "(live ...)", "pattern": "\\(live.*?\\)$", "replacement": "", "ci": true },
+      { "_comment": "| Something", "pattern": "\\|.*$", "replacement": "", "ci": true },
+      { "_comment": "The new \"Track title\" featuring", "pattern": "^(|.*\\s)\"(.{5,})\"(\\s.*|)$", "replacement": "$2", "ci": false },
+      { "_comment": "'Track title'", "pattern": "^(|.*\\s)'(.{5,})'(\\s.*|)$", "replacement": "$2", "ci": false },
+      { "_comment": "(*01/01/1999*)", "pattern": "\\(.*[0-9]{1,2}\\/[0-9]{1,2}\\/[0-9]{2,4}.*\\)", "replacement": "", "ci": true },
+      { "_comment": "sub español", "pattern": "sub\\s*español", "replacement": "", "ci": true },
+      { "_comment": "(Letra)", "pattern": "\\s\\(Letra\\)", "replacement": "", "ci": true },
+      { "_comment": "(En vivo)", "pattern": "\\s\\(En\\svivo\\)", "replacement": "", "ci": true },
+      { "_comment": "sub español (again, as in source)", "pattern": "sub\\s*español", "replacement": "", "ci": true }
+    ],
+    "trim_symbols": [
+      { "_comment": "leftovers like ( )", "pattern": "\\(+\\s*\\)+", "replacement": "", "ci": false },
+      { "_comment": "leading junk", "pattern": "^[/,:;~\\s\"-]+", "replacement": "", "ci": false },
+      { "_comment": "trailing junk", "pattern": "[/,:;~\\s\"-]+$", "replacement": "", "ci": false },
+      { "_comment": "multiple spaces", "pattern": "\\x{0020}{1,}", "replacement": " ", "ci": false }
+    ],
+    "ltr_rtl": [
+      { "pattern": "\\x{200E}", "replacement": "", "ci": false, "global": true },
+      { "pattern": "\\x{200F}", "replacement": "", "ci": false, "global": true }
+    ],
+    "numeric_prefix": [
+      { "_comment": "NN. or NN)", "pattern": "^\\d{1,2}[.)]\\s?", "replacement": "", "ci": false },
+      { "_comment": "(NN).", "pattern": "^\\(\\d{1,2}\\)\\.", "replacement": "", "ci": false }
+    ]
+  },
+  "track_stages": ["youtube_track", "trim_symbols", "ltr_rtl", "numeric_prefix"],
+  "artist_stages": ["ltr_rtl", "numeric_prefix"]
+}

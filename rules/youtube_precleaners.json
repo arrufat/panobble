@@ -1,0 +1,12 @@
+{
+  "_source": "pano-scrobbler MetadataUtils.kt parseYoutubeTitle pre-clean steps (originally web-scrobbler). Applied in order, replace-all. Patterns are RE2-compatible.",
+  "rules": [
+    { "_comment": "[genre] or 【genre】 at start", "pattern": "^((\\[[^\\]]+])|(【[^】]+】))\\s*-*\\s*", "replacement": "", "ci": true },
+    { "_comment": "CD/vinyl track numbers at start", "pattern": "^\\s*([a-zA-Z]{1,2}|[0-9]{1,2})[1-9]?\\.\\s+", "replacement": "", "ci": true },
+    { "_comment": "dash preceding opening bracket", "pattern": "-\\s*([「【『])", "replacement": "$1", "ci": false },
+    { "_comment": "bracketed Music Video / MV / PV", "pattern": "[(［【][^(［【]*?((Music Video)|(MV)|(PV)).*?[】］)]", "replacement": "", "ci": true },
+    { "_comment": "bracketed 東方 / オリジナル", "pattern": "[(［【]((オリジナル)|(東方)).*?[】］)]+?", "replacement": "", "ci": true },
+    { "_comment": "MV/PV before a bracket", "pattern": "((?:Music Video)|MV|PV)([「［【『』】］」])", "replacement": "$2", "ci": true },
+    { "_comment": "trailing MV/PV", "pattern": "\\s+(MV|PV)$", "replacement": "", "ci": true }
+  ]
+}
