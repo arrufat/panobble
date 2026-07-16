@@ -18,6 +18,9 @@ func TestLoadMissingFileGivesDefaults(t *testing.T) {
 	if len(cfg.Cleanup.Presets) != 5 {
 		t.Errorf("expected 5 default presets, got %v", cfg.Cleanup.Presets)
 	}
+	if !cfg.Players.RequireAlbum {
+		t.Error("require_album should default to true")
+	}
 }
 
 func TestLoadClampsAndParses(t *testing.T) {
@@ -33,7 +36,7 @@ min_duration_secs = 5
 
 [players]
 allowed = ["spotify"]
-require_album = ["org.mpris.MediaPlayer2.chromium"]
+require_album = false
 
 [[rule]]
 name = "strip feat"
@@ -60,8 +63,8 @@ continue_matching = true
 	if len(cfg.Rules) != 1 || cfg.Rules[0].Search["track"] == "" {
 		t.Errorf("rule not parsed: %+v", cfg.Rules)
 	}
-	if len(cfg.Players.RequireAlbum) != 1 {
-		t.Errorf("require_album not parsed: %+v", cfg.Players)
+	if cfg.Players.RequireAlbum {
+		t.Errorf("require_album = false not parsed: %+v", cfg.Players)
 	}
 }
 

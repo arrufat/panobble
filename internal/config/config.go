@@ -23,8 +23,11 @@ type Scrobble struct {
 }
 
 type Players struct {
-	Allowed          []string `toml:"allowed"`
-	RequireAlbum     []string `toml:"require_album"`
+	Allowed []string `toml:"allowed"`
+	// RequireAlbum drops tracks whose album metadata is missing. On by
+	// default: real music players (and YT Music in a browser) report an
+	// album; YouTube videos and other junk media do not.
+	RequireAlbum     bool     `toml:"require_album"`
 	BlockedHostnames []string `toml:"blocked_hostnames"`
 }
 
@@ -62,6 +65,9 @@ func Default() Config {
 			DelayMaxSecs:    240,
 			MinDurationSecs: 30,
 			NowPlaying:      true,
+		},
+		Players: Players{
+			RequireAlbum: true,
 		},
 		Cleanup: Cleanup{
 			Presets: []string{

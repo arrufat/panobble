@@ -179,9 +179,7 @@ func TestDisallowedPlayerIgnored(t *testing.T) {
 }
 
 func TestRequireAlbumDropsAlbumless(t *testing.T) {
-	h := newHarness(t, func(c *config.Config) {
-		c.Players.RequireAlbum = []string{"testplayer"}
-	})
+	h := newHarness(t, nil) // require_album is on by default
 	h.sendMetadata(mpris.Metadata{Artist: "Artist", Title: "Some Video"})
 	h.sendStatus(mpris.StatusPlaying, 0)
 
@@ -232,6 +230,8 @@ func TestNowPlayingSuppressedOnQuickResume(t *testing.T) {
 func TestSpotifyAdIgnored(t *testing.T) {
 	h := newHarness(t, func(c *config.Config) {
 		c.Players.Allowed = []string{"spotify"}
+		// off, so this test exercises the ad heuristic, not the album check
+		c.Players.RequireAlbum = false
 	})
 	bus := "org.mpris.MediaPlayer2.spotify"
 	md := mpris.Metadata{Title: "Advertisement", Artist: "Brand", AlbumArtist: "Brand"}

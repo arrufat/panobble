@@ -48,8 +48,10 @@ Set `PANOBBLE_DEBUG=1` for debug logs.
 - Tracks are cleaned first: placeholder metadata dropped, `(2004 Remaster)`
   and `(Explicit)` suffixes stripped, YouTube video titles parsed into
   artist/track, then your `[[rule]]` regex edits.
-- `require_album` drops tracks without album metadata from selected apps
-  (a heuristic to skip YouTube *videos* while scrobbling YT Music).
+- By default a track only scrobbles when artist, title **and album** are all
+  present (`require_album`, on by default) — the heuristic that skips
+  YouTube *videos* while scrobbling YT Music. Turn it off if your players
+  report untagged files or radio streams.
 - Failed submissions queue in `$XDG_DATA_HOME/panobble/pending.jsonl` and
   retry on start, hourly, and after the next successful scrobble.
 

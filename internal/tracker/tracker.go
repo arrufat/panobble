@@ -174,7 +174,7 @@ func (tr *Tracker) shouldIgnore(p *player, md mpris.Metadata) bool {
 		tr.log.Info("ignoring spotify ad (metadata)")
 		return true
 	}
-	if md.Album == "" && mpris.MatchesApp(p.appID, tr.cfg.Players.RequireAlbum) {
+	if md.Album == "" && tr.cfg.Players.RequireAlbum {
 		tr.log.Info("ignoring track without album", "app", p.appID, "title", md.Title)
 		return true
 	}

@@ -16,9 +16,11 @@ now_playing = true
 # Run `panobble players` while your player is open to discover ids.
 # The org.mpris.MediaPlayer2. prefix is optional.
 allowed = []
-# Apps whose tracks are dropped when album metadata is missing
-# (heuristic: YouTube videos have no album, YT Music tracks do).
-require_album = []
+# Only scrobble when artist, title AND album are all present (default: true).
+# Heuristic to skip non-music media: YouTube videos publish no album over
+# MPRIS, YT Music tracks and real music players do. Set to false if you
+# scrobble from players with untagged files or radio streams.
+require_album = true
 # Hostnames (from the player's xesam:url, www. stripped) never to scrobble.
 blocked_hostnames = []
 
