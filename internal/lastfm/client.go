@@ -1,5 +1,8 @@
 // Package lastfm is a minimal Last.fm API client covering auth, now-playing
 // and scrobbling.
+//
+// Protocol details (api_sig, batch format, OOB auth flow, error codes) are
+// ported from pano-scrobbler's Lastfm.kt and LastFmUnauthedRequester.kt.
 package lastfm
 
 import (

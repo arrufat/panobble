@@ -1,4 +1,8 @@
 // Package scrobble defines the core Track type and the Scrobbler interface.
+//
+// The error taxonomy (Retryable/Terminal/NeedsReauth) is ported from
+// pano-scrobbler's PendingScrobblesDao.isNetworkRetryable and
+// PendingScrobblesWorker; SafeDuration from ScrobbleData.kt.
 package scrobble
 
 import (

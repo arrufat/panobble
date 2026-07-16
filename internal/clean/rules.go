@@ -1,5 +1,9 @@
 // Package clean is the metadata cleanup pipeline: sanitize, regex presets,
 // YouTube title parsing, and user regex edits.
+//
+// Ported from pano-scrobbler: MetadataUtils.kt (YouTube parser, splitter,
+// sanitize), RegexPresets.kt (presets, 🅴 trim, "- Topic"), RegexEditsDao.kt
+// (user rules), and ScrobbleEverywhere.preprocessMetadata (pipeline order).
 package clean
 
 import (

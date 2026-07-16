@@ -1,3 +1,9 @@
+// Package mpris watches MPRIS players on the session bus and normalizes
+// their metadata and playback state into events.
+//
+// Ported from pano-scrobbler: MetadataTransforms.jvm.kt (host normalization,
+// wildcard domains, Spotify ad quirk), PlaybackInfoTransforms.jvm.kt and
+// DesktopMediaListener.kt (playback quirks), and DesktopStuff.normalizeAppId.
 package mpris
 
 import (

@@ -1,6 +1,10 @@
 // Package tracker is the scrobbling state machine: it consumes normalized
 // MPRIS events and decides when to send now-playing and scrobbles. A single
 // event loop owns all mutable state.
+//
+// Ported from pano-scrobbler: MediaListener.kt (state machine, timing,
+// pause/resume), PlayingTrackInfo.kt (track state, hash), and
+// ScrobbleQueue.kt (meta debounce, now-playing suppression).
 package tracker
 
 import (

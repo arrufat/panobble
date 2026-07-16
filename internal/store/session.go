@@ -1,5 +1,8 @@
 // Package store persists panobble's state: the Last.fm session and the
 // pending-scrobbles queue.
+//
+// The queue semantics (batching, backoff, expiry, terminal drops) are ported
+// from pano-scrobbler's PendingScrobblesWorker.kt and PendingScrobblesDao.kt.
 package store
 
 import (
