@@ -26,11 +26,8 @@ const (
 
 // Submitter receives the tracker's output. Implementations do network I/O on
 // their own goroutines; they must not call back into the tracker.
-//
-// Scrobbling is deferred: Qualified fires when a track passes the threshold
-// (so it can be journaled for crash safety), Scrobble when the track actually
-// ends — that way last.fm never shows a track as both scrobbled and
-// now-playing.
+// Qualified fires when a track passes the threshold (journal it), Scrobble
+// when its play ends (commit it).
 type Submitter interface {
 	NowPlaying(t scrobble.Track)
 	Qualified(t scrobble.Track)
@@ -131,7 +128,7 @@ func (tr *Tracker) handleMprisEvent(ev mpris.Event) {
 
 	switch {
 	case ev.Removed:
-		tr.commit(p) // player exited: the held scrobble's track has ended
+		tr.commit(p)
 		tr.pause(p)
 		p.stopTimers()
 		delete(tr.players, ev.BusName)
@@ -150,6 +147,7 @@ func (tr *Tracker) handleMprisEvent(ev mpris.Event) {
 			tr.commit(p)
 			p.timePlayed = 0
 			p.playStartTime = tr.now()
+			p.startedAt = p.playStartTime
 			p.scrobbled = stateNone
 			tr.arm(p)
 		}
@@ -161,8 +159,8 @@ func (tr *Tracker) metadataChanged(p *player, md mpris.Metadata) {
 		md.Album == p.md.Album && md.AlbumArtist == p.md.AlbumArtist
 	onlyDurationUpdated := sameAsOld && md.Duration != p.md.Duration
 
-	// A late duration update must not restart a track that already
-	// qualified (it would journal and commit a second scrobble).
+	// A late duration update must not restart an already-qualified track
+	// (it would journal and commit a second scrobble).
 	if onlyDurationUpdated && p.scrobbled >= stateQualified {
 		p.md.Duration = md.Duration
 		p.lastDuration = md.Duration
@@ -171,7 +169,7 @@ func (tr *Tracker) metadataChanged(p *player, md mpris.Metadata) {
 
 	if !sameAsOld || (onlyDurationUpdated && md.Duration > 0) {
 		if !sameAsOld {
-			tr.commit(p) // track changed: the held scrobble's track has ended
+			tr.commit(p)
 		}
 		p.md = md
 		p.urlHost = md.URLHost
@@ -179,8 +177,10 @@ func (tr *Tracker) metadataChanged(p *player, md mpris.Metadata) {
 		p.scrobbled = stateNone
 		if p.isPlaying {
 			p.playStartTime = tr.now()
+			p.startedAt = p.playStartTime
 		} else {
 			p.playStartTime = time.Time{}
+			p.startedAt = time.Time{}
 		}
 
 		armedForThis := p.scrobbleTimer != nil && p.lastScrobbleHash == p.hash
@@ -244,7 +244,7 @@ func (tr *Tracker) playbackStateChanged(p *player, status mpris.PlaybackStatus, 
 
 	switch status {
 	case mpris.StatusStopped:
-		tr.commit(p) // playback ended; a pause merely holds the scrobble
+		tr.commit(p) // a stop ends the play; a pause only holds it
 		tr.pause(p)
 
 	case mpris.StatusPaused, mpris.StatusUnknown:
@@ -254,12 +254,16 @@ func (tr *Tracker) playbackStateChanged(p *player, status mpris.PlaybackStatus, 
 		if p.scrobbled < stateCancelled {
 			p.isPlaying = true
 			if p.playStartTime.IsZero() {
-				p.playStartTime = tr.now()
+				p.playStartTime = tr.now() // resume: new accumulation segment
+			}
+			if p.startedAt.IsZero() {
+				p.startedAt = tr.now()
 			}
 
 			if p.hash != p.lastScrobbleHash || (position >= 0 && isPossiblyAtStart) {
 				p.timePlayed = 0
 				p.playStartTime = tr.now()
+				p.startedAt = p.playStartTime // a fresh play of the track
 			}
 
 			armed := p.scrobbleTimer != nil
@@ -287,6 +291,7 @@ func (tr *Tracker) pause(p *player) {
 			p.timePlayed = 0
 		}
 	}
+	p.playStartTime = time.Time{} // close the accumulation segment
 	p.isPlaying = false
 	p.stopTimers()
 }
@@ -313,6 +318,9 @@ func (tr *Tracker) arm(p *player) {
 	p.isPlaying = true
 	if p.playStartTime.IsZero() {
 		p.playStartTime = tr.now()
+	}
+	if p.startedAt.IsZero() {
+		p.startedAt = p.playStartTime
 	}
 
 	delay := scrobbleDelay(
@@ -348,7 +356,7 @@ func (tr *Tracker) handleTimerEvent(te timerEvent) {
 		if p.scrobbled != statePrepared {
 			return
 		}
-		cleaned, res := tr.pipeline.Clean(p.rawTrack(p.playStartTime), p.urlHost)
+		cleaned, res := tr.pipeline.Clean(p.rawTrack(p.startedAt), p.urlHost)
 		switch {
 		case res.Blocked:
 			tr.log.Info("blocked by rule", "rule", res.BlockReason, "title", p.md.Title)
@@ -375,7 +383,7 @@ func (tr *Tracker) handleTimerEvent(te timerEvent) {
 		t := p.cleaned
 		if t.Title == "" {
 			// meta debounce hasn't run (sub-second delay); clean now.
-			cleaned, res := tr.pipeline.Clean(p.rawTrack(p.playStartTime), p.urlHost)
+			cleaned, res := tr.pipeline.Clean(p.rawTrack(p.startedAt), p.urlHost)
 			if res.Blocked || res.ParseFailed {
 				tr.cancel(p)
 				return

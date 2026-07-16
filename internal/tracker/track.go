@@ -37,7 +37,12 @@ type player struct {
 	lastPlayback     mpris.PlaybackStatus
 	lastDuration     time.Duration
 
-	playStartTime time.Time     // zero = unset
+	// startedAt is when this play began (the scrobble timestamp).
+	// playStartTime is the start of the current unpaused segment, the
+	// baseline for timePlayed — kept separate so pause gaps never count
+	// as played time.
+	startedAt     time.Time
+	playStartTime time.Time     // zero = paused / unset
 	timePlayed    time.Duration // accumulated across pauses
 
 	// now-playing resend suppression

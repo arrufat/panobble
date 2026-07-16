@@ -251,6 +251,51 @@ func TestPauseCancelsAndResumeAccounts(t *testing.T) {
 	}
 }
 
+// Multiple pause/resume cycles must accumulate only actually-played time:
+// pause gaps don't count, and earlier segments aren't double-counted (the
+// bug would make the track qualify far too early). The committed scrobble
+// keeps the original play-start timestamp, not the resume time.
+func TestMultiPauseAccounting(t *testing.T) {
+	h := newHarness(t, nil)
+	h.tr.unknownDelay = 300 * time.Millisecond // threshold for this test
+
+	t0 := time.Now()
+	h.sendMetadata(testTrack)
+	h.sendStatus(mpris.StatusPlaying, 0)
+
+	time.Sleep(40 * time.Millisecond)
+	h.sendStatus(mpris.StatusPaused, 60*time.Second) // played ~40ms
+	time.Sleep(200 * time.Millisecond)               // long pause gap
+	h.sendStatus(mpris.StatusPlaying, 60*time.Second)
+
+	time.Sleep(40 * time.Millisecond)
+	h.sendStatus(mpris.StatusPaused, 60*time.Second) // played ~80ms total
+	time.Sleep(50 * time.Millisecond)
+	resumedAt := time.Now()
+	h.sendStatus(mpris.StatusPlaying, 60*time.Second)
+
+	// ~80ms of 300ms played: needs ~220ms more. With the double-counting
+	// bug, timePlayed would already exceed the threshold and qualification
+	// would fire at the 30ms floor.
+	time.Sleep(120 * time.Millisecond)
+	if h.sub.qualifiedCount() != 0 {
+		t.Fatal("qualified too early: pause gaps counted as played time")
+	}
+	if !waitFor(t, time.Second, func() bool { return h.sub.qualifiedCount() == 1 }) {
+		t.Fatal("track never qualified after resumes")
+	}
+
+	h.sendStatus(mpris.StatusStopped, -1)
+	if !waitFor(t, time.Second, func() bool { _, s := h.sub.counts(); return s == 1 }) {
+		t.Fatal("never committed")
+	}
+	got := h.sub.lastScrobble()
+	if got.Timestamp.Sub(t0) > 150*time.Millisecond {
+		t.Errorf("timestamp should be the original play start (t0+%v), not near a resume (t0+%v)",
+			got.Timestamp.Sub(t0), resumedAt.Sub(t0))
+	}
+}
+
 func TestDisallowedPlayerIgnored(t *testing.T) {
 	h := newHarness(t, nil)
 	md := testTrack
