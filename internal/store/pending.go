@@ -8,18 +8,23 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"sync"
 	"syscall"
 	"time"
 
 	"github.com/arrufat/panobble/internal/scrobble"
 )
 
-// Pending is one queued offline scrobble.
+// Pending is one queued scrobble: either a failed submission awaiting retry,
+// or a qualified track whose commit is deferred until its play ends
+// (Deferred). Deferred entries are the crash journal — if the daemon dies
+// before committing, the next start promotes them to normal retries.
 type Pending struct {
 	Track         scrobble.Track `json:"track"`
 	LastFailed    time.Time      `json:"lastFailed"`
-	Reason        string         `json:"reason"`
+	Reason        string         `json:"reason,omitempty"`
 	CanForceRetry bool           `json:"canForceRetry"` // network-retryable failure
+	Deferred      bool           `json:"deferred,omitempty"`
 }
 
 const (
@@ -30,8 +35,10 @@ const (
 )
 
 // Queue is the pending-scrobbles JSONL file. The owner holds a flock for its
-// lifetime, so daemon and CLI cannot flush concurrently.
+// lifetime, so daemon and CLI cannot flush concurrently; the mutex serializes
+// the daemon's own goroutines.
 type Queue struct {
+	mu   sync.Mutex
 	path string
 	f    *os.File // locked; also used for appends
 	now  func() time.Time
@@ -62,13 +69,75 @@ func (q *Queue) Close() error {
 
 // Enqueue appends one failed scrobble.
 func (q *Queue) Enqueue(t scrobble.Track, reason string, canForceRetry bool) error {
-	p := Pending{Track: t, LastFailed: q.now(), Reason: truncate(reason, 100), CanForceRetry: canForceRetry}
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	return q.append(Pending{Track: t, LastFailed: q.now(),
+		Reason: truncate(reason, 100), CanForceRetry: canForceRetry})
+}
+
+// AddDeferred journals a qualified track whose commit is pending.
+func (q *Queue) AddDeferred(t scrobble.Track) error {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	return q.append(Pending{Track: t, Deferred: true})
+}
+
+// ResolveDeferred removes a journaled deferred entry once its commit has been
+// handled (submitted, or converted into a normal retry via Enqueue).
+func (q *Queue) ResolveDeferred(t scrobble.Track) error {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	all, err := q.list()
+	if err != nil {
+		return err
+	}
+	keep := all[:0]
+	for _, p := range all {
+		if p.Deferred && sameTrack(p.Track, t) {
+			continue
+		}
+		keep = append(keep, p)
+	}
+	return q.rewrite(keep)
+}
+
+// PromoteDeferred converts leftover deferred entries (a previous daemon died
+// before committing them) into immediately-retryable pendings. Returns how
+// many were promoted.
+func (q *Queue) PromoteDeferred() (int, error) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	all, err := q.list()
+	if err != nil {
+		return 0, err
+	}
+	n := 0
+	for i := range all {
+		if all[i].Deferred {
+			all[i].Deferred = false
+			all[i].CanForceRetry = true
+			all[i].LastFailed = q.now()
+			all[i].Reason = "recovered after restart"
+			n++
+		}
+	}
+	if n == 0 {
+		return 0, nil
+	}
+	return n, q.rewrite(all)
+}
+
+func (q *Queue) append(p Pending) error {
 	data, err := json.Marshal(p)
 	if err != nil {
 		return err
 	}
 	_, err = q.f.Write(append(data, '\n'))
 	return err
+}
+
+func sameTrack(a, b scrobble.Track) bool {
+	return a.Timestamp.Equal(b.Timestamp) && a.Artist == b.Artist && a.Title == b.Title
 }
 
 // List reads all queued entries (also usable without the lock, read-only).
@@ -114,6 +183,8 @@ func readEntries(f *os.File) ([]Pending, error) {
 // than 14 days or terminally rejected are dropped. Survivors are rewritten
 // atomically.
 func (q *Queue) Flush(ctx context.Context, s scrobble.Scrobbler) error {
+	q.mu.Lock()
+	defer q.mu.Unlock()
 	all, err := q.list()
 	if err != nil {
 		return err
@@ -125,6 +196,10 @@ func (q *Queue) Flush(ctx context.Context, s scrobble.Scrobbler) error {
 	now := q.now()
 	var keep, eligible []Pending
 	for _, p := range all {
+		if p.Deferred {
+			keep = append(keep, p) // held for commit; never flushed
+			continue
+		}
 		if now.Sub(p.Track.Timestamp) > maxAge {
 			continue // too old for last.fm: drop
 		}
@@ -206,10 +281,18 @@ func (q *Queue) rewrite(entries []Pending) error {
 	return w.Flush()
 }
 
-// Len returns the number of queued entries.
+// Len returns the number of retryable (non-deferred) entries.
 func (q *Queue) Len() (int, error) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
 	entries, err := q.list()
-	return len(entries), err
+	n := 0
+	for _, p := range entries {
+		if !p.Deferred {
+			n++
+		}
+	}
+	return n, err
 }
 
 func truncate(s string, n int) string {

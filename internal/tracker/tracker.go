@@ -26,8 +26,14 @@ const (
 
 // Submitter receives the tracker's output. Implementations do network I/O on
 // their own goroutines; they must not call back into the tracker.
+//
+// Scrobbling is deferred: Qualified fires when a track passes the threshold
+// (so it can be journaled for crash safety), Scrobble when the track actually
+// ends — that way last.fm never shows a track as both scrobbled and
+// now-playing.
 type Submitter interface {
 	NowPlaying(t scrobble.Track)
+	Qualified(t scrobble.Track)
 	Scrobble(t scrobble.Track)
 }
 
@@ -71,8 +77,10 @@ func New(cfg config.Config, pipeline *clean.Pipeline, submitter Submitter, log *
 	}
 }
 
-// Run consumes events until ctx is cancelled or the channel closes.
+// Run consumes events until ctx is cancelled or the channel closes, then
+// commits any qualified-but-uncommitted scrobbles before returning.
 func (tr *Tracker) Run(ctx context.Context, events <-chan mpris.Event) {
+	defer tr.drain()
 	for {
 		select {
 		case <-ctx.Done():
@@ -86,6 +94,25 @@ func (tr *Tracker) Run(ctx context.Context, events <-chan mpris.Event) {
 			tr.handleTimerEvent(te)
 		}
 	}
+}
+
+// drain commits all held scrobbles (daemon shutdown).
+func (tr *Tracker) drain() {
+	for _, p := range tr.players {
+		tr.commit(p)
+		p.stopTimers()
+	}
+}
+
+// commit submits the held scrobble of a qualified track. No-op otherwise.
+func (tr *Tracker) commit(p *player) {
+	if p.scrobbled != stateQualified {
+		return
+	}
+	p.scrobbled = stateScrobbleSubmitted
+	tr.log.Info("scrobbling", "artist", p.cleaned.Artist, "title", p.cleaned.Title,
+		"album", p.cleaned.Album)
+	tr.submitter.Scrobble(p.cleaned)
 }
 
 func (tr *Tracker) handleMprisEvent(ev mpris.Event) {
@@ -104,6 +131,7 @@ func (tr *Tracker) handleMprisEvent(ev mpris.Event) {
 
 	switch {
 	case ev.Removed:
+		tr.commit(p) // player exited: the held scrobble's track has ended
 		tr.pause(p)
 		p.stopTimers()
 		delete(tr.players, ev.BusName)
@@ -115,9 +143,11 @@ func (tr *Tracker) handleMprisEvent(ev mpris.Event) {
 		tr.playbackStateChanged(p, *ev.Status, ev.Position, ev.CanGoNext)
 
 	case ev.SeekedTo != nil:
-		// A seek back to the start is a replay: allow rescrobbling.
+		// A seek back to the start is a replay: commit the finished play
+		// and allow rescrobbling.
 		if *ev.SeekedTo < tr.startPosLimit && p.isPlaying &&
-			p.scrobbled >= stateScrobbleSubmitted {
+			p.scrobbled >= stateQualified && p.scrobbled != stateCancelled {
+			tr.commit(p)
 			p.timePlayed = 0
 			p.playStartTime = tr.now()
 			p.scrobbled = stateNone
@@ -131,7 +161,18 @@ func (tr *Tracker) metadataChanged(p *player, md mpris.Metadata) {
 		md.Album == p.md.Album && md.AlbumArtist == p.md.AlbumArtist
 	onlyDurationUpdated := sameAsOld && md.Duration != p.md.Duration
 
+	// A late duration update must not restart a track that already
+	// qualified (it would journal and commit a second scrobble).
+	if onlyDurationUpdated && p.scrobbled >= stateQualified {
+		p.md.Duration = md.Duration
+		p.lastDuration = md.Duration
+		return
+	}
+
 	if !sameAsOld || (onlyDurationUpdated && md.Duration > 0) {
+		if !sameAsOld {
+			tr.commit(p) // track changed: the held scrobble's track has ended
+		}
 		p.md = md
 		p.urlHost = md.URLHost
 		p.hash = trackHash(md, p.appID, p.busName)
@@ -202,7 +243,11 @@ func (tr *Tracker) playbackStateChanged(p *player, status mpris.PlaybackStatus, 
 	}
 
 	switch status {
-	case mpris.StatusPaused, mpris.StatusStopped, mpris.StatusUnknown:
+	case mpris.StatusStopped:
+		tr.commit(p) // playback ended; a pause merely holds the scrobble
+		tr.pause(p)
+
+	case mpris.StatusPaused, mpris.StatusUnknown:
 		tr.pause(p)
 
 	case mpris.StatusPlaying:
@@ -222,8 +267,8 @@ func (tr *Tracker) playbackStateChanged(p *player, status mpris.PlaybackStatus, 
 				tr.now().Sub(p.playStartTime) < tr.startPosLimit*2
 
 			if !armed &&
-				((position >= 0 && isPossiblyAtStart) ||
-					(p.scrobbled < stateScrobbleSubmitted && !positionSpam)) {
+				((position >= 0 && isPossiblyAtStart && p.scrobbled != stateQualified) ||
+					(p.scrobbled < stateQualified && !positionSpam)) {
 				tr.arm(p)
 			}
 		}
@@ -323,7 +368,7 @@ func (tr *Tracker) handleTimerEvent(te timerEvent) {
 		}
 		p.scrobbled = stateNowPlayingSubmitted
 
-	case 1: // scrobble
+	case 1: // threshold crossed: qualify, hold the commit until track end
 		if p.scrobbled != statePrepared && p.scrobbled != stateNowPlayingSubmitted {
 			return
 		}
@@ -337,9 +382,11 @@ func (tr *Tracker) handleTimerEvent(te timerEvent) {
 			}
 			t = cleaned
 		}
-		p.scrobbled = stateScrobbleSubmitted
-		tr.log.Info("scrobbling", "artist", t.Artist, "title", t.Title, "album", t.Album)
-		tr.submitter.Scrobble(t)
+		p.cleaned = t
+		p.scrobbled = stateQualified
+		p.scrobbleTimer = nil // spent
+		tr.log.Info("qualified", "artist", t.Artist, "title", t.Title)
+		tr.submitter.Qualified(t)
 	}
 }
 

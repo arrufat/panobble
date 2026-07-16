@@ -15,6 +15,7 @@ const (
 	stateNone scrobbledState = iota
 	statePrepared
 	stateNowPlayingSubmitted
+	stateQualified // passed the threshold; commit deferred to track end
 	stateScrobbleSubmitted
 	stateCancelled
 )

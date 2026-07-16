@@ -42,9 +42,11 @@ Set `PANOBBLE_DEBUG=1` for debug logs.
 
 - Only players in `[players].allowed` (ids normalized: chromium's
   `.instanceNNN` suffix is stripped).
-- A track scrobbles after `min(50% of its duration, 4 min)`, minimum 30s,
-  with pause time accounted — the same rules as pano-scrobbler and the
-  Last.fm guidelines.
+- A track *qualifies* after `min(50% of its duration, 4 min)`, minimum 30s,
+  with pause time accounted. The scrobble is committed when the play actually
+  ends — track change, stop, player exit, replay, or daemon shutdown — so
+  last.fm never shows a track as both scrobbled and now-playing. Qualified
+  tracks are journaled on disk, so a crash before the commit loses nothing.
 - Tracks are cleaned first: placeholder metadata dropped, `(2004 Remaster)`
   and `(Explicit)` suffixes stripped, YouTube video titles parsed into
   artist/track, then your `[[rule]]` regex edits.

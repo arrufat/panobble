@@ -121,6 +121,53 @@ func TestFlushDropsTerminalAndOld(t *testing.T) {
 	}
 }
 
+func TestDeferredJournalLifecycle(t *testing.T) {
+	q := openTestQueue(t)
+	now := time.Now()
+	tr := track("A", now)
+
+	// Journaled entries are invisible to flush and Len.
+	q.AddDeferred(tr)
+	if n, _ := q.Len(); n != 0 {
+		t.Fatalf("deferred entries must not count as retryable, len = %d", n)
+	}
+	fs := &fakeScrobbler{}
+	if err := q.Flush(context.Background(), fs); err != nil {
+		t.Fatal(err)
+	}
+	if len(fs.batches) != 0 {
+		t.Fatal("flush must not submit deferred entries")
+	}
+
+	// Resolving removes the journal entry.
+	if err := q.ResolveDeferred(tr); err != nil {
+		t.Fatal(err)
+	}
+	entries, _ := ListPending(q.path[:len(q.path)-len("/pending.jsonl")])
+	if len(entries) != 0 {
+		t.Fatalf("journal entry should be gone, got %v", entries)
+	}
+}
+
+func TestPromoteDeferredRecoversAfterCrash(t *testing.T) {
+	q := openTestQueue(t)
+	q.AddDeferred(track("A", time.Now().Add(-time.Minute)))
+
+	n, err := q.PromoteDeferred()
+	if err != nil || n != 1 {
+		t.Fatalf("promoted %d, err %v", n, err)
+	}
+
+	// Promoted entries flush immediately (canForceRetry).
+	fs := &fakeScrobbler{}
+	if err := q.Flush(context.Background(), fs); err != nil {
+		t.Fatal(err)
+	}
+	if len(fs.batches) != 1 || fs.batches[0][0].Artist != "A" {
+		t.Fatalf("promoted entry not flushed: %v", fs.batches)
+	}
+}
+
 func TestQueueLocking(t *testing.T) {
 	dir := t.TempDir()
 	q1, err := OpenQueue(dir)

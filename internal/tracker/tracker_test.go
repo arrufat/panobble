@@ -16,6 +16,7 @@ import (
 type fakeSubmitter struct {
 	mu         sync.Mutex
 	nowPlaying []scrobble.Track
+	qualified  []scrobble.Track
 	scrobbles  []scrobble.Track
 }
 
@@ -23,6 +24,18 @@ func (f *fakeSubmitter) NowPlaying(t scrobble.Track) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.nowPlaying = append(f.nowPlaying, t)
+}
+
+func (f *fakeSubmitter) Qualified(t scrobble.Track) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.qualified = append(f.qualified, t)
+}
+
+func (f *fakeSubmitter) qualifiedCount() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return len(f.qualified)
 }
 
 func (f *fakeSubmitter) Scrobble(t scrobble.Track) {
@@ -114,12 +127,82 @@ func TestHappyPathScrobble(t *testing.T) {
 	if !waitFor(t, time.Second, func() bool { np, _ := h.sub.counts(); return np == 1 }) {
 		t.Fatal("now-playing not sent")
 	}
+	// Threshold crossed: qualified, but not yet committed.
+	if !waitFor(t, time.Second, func() bool { return h.sub.qualifiedCount() == 1 }) {
+		t.Fatal("track never qualified")
+	}
+	time.Sleep(30 * time.Millisecond)
+	if _, s := h.sub.counts(); s != 0 {
+		t.Fatal("scrobble committed before track end")
+	}
+
+	// Track ends (stop): commit.
+	h.sendStatus(mpris.StatusStopped, -1)
 	if !waitFor(t, time.Second, func() bool { _, s := h.sub.counts(); return s == 1 }) {
-		t.Fatal("scrobble not sent")
+		t.Fatal("scrobble not committed on stop")
 	}
 	got := h.sub.lastScrobble()
 	if got.Artist != "Artist" || got.Title != "Song" {
 		t.Errorf("unexpected scrobble: %+v", got)
+	}
+}
+
+func TestCommitOnTrackChange(t *testing.T) {
+	h := newHarness(t, nil)
+	h.sendMetadata(testTrack)
+	h.sendStatus(mpris.StatusPlaying, 0)
+	waitFor(t, time.Second, func() bool { return h.sub.qualifiedCount() == 1 })
+
+	// Next track begins: previous commits, new one plays on.
+	h.sendMetadata(mpris.Metadata{Artist: "Other", Title: "Next", Album: "Album"})
+	if !waitFor(t, time.Second, func() bool { _, s := h.sub.counts(); return s == 1 }) {
+		t.Fatal("previous track not committed on change")
+	}
+	if got := h.sub.lastScrobble(); got.Title != "Song" {
+		t.Errorf("committed wrong track: %q", got.Title)
+	}
+}
+
+func TestCommitOnPlayerExit(t *testing.T) {
+	h := newHarness(t, nil)
+	h.sendMetadata(testTrack)
+	h.sendStatus(mpris.StatusPlaying, 0)
+	waitFor(t, time.Second, func() bool { return h.sub.qualifiedCount() == 1 })
+
+	h.events <- mpris.Event{BusName: testBus, AppID: testBus, Removed: true, Position: -1}
+	if !waitFor(t, time.Second, func() bool { _, s := h.sub.counts(); return s == 1 }) {
+		t.Fatal("scrobble not committed on player exit")
+	}
+}
+
+func TestCommitOnShutdown(t *testing.T) {
+	h := newHarness(t, nil)
+	h.sendMetadata(testTrack)
+	h.sendStatus(mpris.StatusPlaying, 0)
+	waitFor(t, time.Second, func() bool { return h.sub.qualifiedCount() == 1 })
+
+	close(h.events) // daemon shutdown: Run drains
+	if !waitFor(t, time.Second, func() bool { _, s := h.sub.counts(); return s == 1 }) {
+		t.Fatal("scrobble not committed on shutdown")
+	}
+}
+
+func TestPauseHoldsCommit(t *testing.T) {
+	h := newHarness(t, nil)
+	h.sendMetadata(testTrack)
+	h.sendStatus(mpris.StatusPlaying, 0)
+	waitFor(t, time.Second, func() bool { return h.sub.qualifiedCount() == 1 })
+
+	// A pause holds the scrobble (the user may resume)...
+	h.sendStatus(mpris.StatusPaused, 30*time.Second)
+	time.Sleep(50 * time.Millisecond)
+	if _, s := h.sub.counts(); s != 0 {
+		t.Fatal("pause must not commit")
+	}
+	// ...a stop commits it.
+	h.sendStatus(mpris.StatusStopped, -1)
+	if !waitFor(t, time.Second, func() bool { _, s := h.sub.counts(); return s == 1 }) {
+		t.Fatal("scrobble not committed on stop after pause")
 	}
 }
 
@@ -129,17 +212,18 @@ func TestSkipBeforeThreshold(t *testing.T) {
 	h.sendStatus(mpris.StatusPlaying, 0)
 
 	// Wait for now-playing (meta debounce done), then switch tracks before
-	// the 60ms scrobble point.
+	// the 60ms qualification point.
 	waitFor(t, time.Second, func() bool { np, _ := h.sub.counts(); return np == 1 })
 	h.sendMetadata(mpris.Metadata{Artist: "Other", Title: "Next", Album: "Album"})
 
-	time.Sleep(120 * time.Millisecond)
-	_, s := h.sub.counts()
-	if s == 0 {
+	// Second track qualifies; stop commits it. The first must never appear.
+	waitFor(t, time.Second, func() bool { return h.sub.qualifiedCount() == 1 })
+	h.sendStatus(mpris.StatusStopped, -1)
+	if !waitFor(t, time.Second, func() bool { _, s := h.sub.counts(); return s == 1 }) {
 		t.Fatal("second track never scrobbled")
 	}
 	if got := h.sub.lastScrobble(); got.Title != "Next" {
-		t.Errorf("first track should have been cancelled, scrobbled %q", got.Title)
+		t.Errorf("first track should have been skipped, scrobbled %q", got.Title)
 	}
 }
 
@@ -151,12 +235,17 @@ func TestPauseCancelsAndResumeAccounts(t *testing.T) {
 
 	h.sendStatus(mpris.StatusPaused, 20*time.Millisecond)
 	time.Sleep(100 * time.Millisecond)
-	if _, s := h.sub.counts(); s != 0 {
-		t.Fatal("paused track should not scrobble")
+	if h.sub.qualifiedCount() != 0 {
+		t.Fatal("paused track should not qualify")
 	}
 
-	// Resume mid-track (position beyond startPosLimit): should still scrobble.
+	// Resume mid-track (position beyond startPosLimit): still qualifies,
+	// and a stop commits it.
 	h.sendStatus(mpris.StatusPlaying, 20*time.Millisecond)
+	if !waitFor(t, time.Second, func() bool { return h.sub.qualifiedCount() == 1 }) {
+		t.Fatal("resumed track never qualified")
+	}
+	h.sendStatus(mpris.StatusStopped, -1)
 	if !waitFor(t, time.Second, func() bool { _, s := h.sub.counts(); return s == 1 }) {
 		t.Fatal("resumed track never scrobbled")
 	}
@@ -192,6 +281,10 @@ func TestRequireAlbumDropsAlbumless(t *testing.T) {
 	// With an album it goes through.
 	h.sendMetadata(testTrack)
 	h.sendStatus(mpris.StatusPlaying, 0)
+	if !waitFor(t, time.Second, func() bool { return h.sub.qualifiedCount() == 1 }) {
+		t.Fatal("track with album never qualified")
+	}
+	h.sendStatus(mpris.StatusStopped, -1)
 	if !waitFor(t, time.Second, func() bool { _, s := h.sub.counts(); return s == 1 }) {
 		t.Fatal("track with album never scrobbled")
 	}
@@ -216,6 +309,10 @@ func TestLateArrivingAlbumStillScrobbles(t *testing.T) {
 	h.sendMetadata(mpris.Metadata{Artist: "Dire Straits", Title: "Down To The Waterline",
 		Album: "Dire Straits"})
 
+	if !waitFor(t, time.Second, func() bool { return h.sub.qualifiedCount() == 1 }) {
+		t.Fatal("completed track never qualified")
+	}
+	h.sendStatus(mpris.StatusStopped, -1)
 	if !waitFor(t, time.Second, func() bool { _, s := h.sub.counts(); return s == 1 }) {
 		t.Fatal("completed track never scrobbled")
 	}
