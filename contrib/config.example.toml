@@ -43,6 +43,12 @@ parse_title_apps = []
 #continue_matching = true
 
 #[[rule]]
+#name = "strip single version"
+#search = { track = '\s*\(single version\)$' }
+#replacement = { track = "" }
+#continue_matching = true
+
+#[[rule]]
 #name = "never scrobble asmr"
 #search = { track = '(?:^|\s)asmr(?:\s|$)' }
 #block = true
