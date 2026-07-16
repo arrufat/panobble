@@ -250,9 +250,14 @@ func (tr *Tracker) pause(p *player) {
 	p.stopTimers()
 }
 
+// cancel marks the current track as never-to-scrobble. Unlike pano (which
+// zeroes the playback state and relies on its native layer's constant stream
+// of playback events to recover), lastPlayback is kept: players like Chromium
+// publish metadata incrementally, and when a later update completes the track
+// (e.g. the album arrives after a require_album ignore), metadataChanged must
+// still see Playing to arm the now-valid track.
 func (tr *Tracker) cancel(p *player) {
 	p.scrobbled = stateCancelled
-	p.lastPlayback = mpris.StatusUnknown // do not scrobble again (pano sets None)
 	p.stopTimers()
 }
 

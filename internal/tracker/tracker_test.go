@@ -197,6 +197,33 @@ func TestRequireAlbumDropsAlbumless(t *testing.T) {
 	}
 }
 
+// Chromium publishes metadata incrementally: title/artist first, album in a
+// later update. The albumless intermediate is ignored (require_album), but
+// the completed track must still scrobble — without any playback-status
+// event in between.
+func TestLateArrivingAlbumStillScrobbles(t *testing.T) {
+	h := newHarness(t, nil)
+	h.sendStatus(mpris.StatusPlaying, 0)
+	h.sendMetadata(mpris.Metadata{Artist: "Dire Straits", Title: "Down To The Waterline"})
+
+	time.Sleep(50 * time.Millisecond)
+	if np, s := h.sub.counts(); np != 0 || s != 0 {
+		t.Fatalf("albumless intermediate submitted: np=%d s=%d", np, s)
+	}
+
+	// Album arrives in a later metadata update; no new status event.
+	// (No duration, so the test-scale unknownDelay applies.)
+	h.sendMetadata(mpris.Metadata{Artist: "Dire Straits", Title: "Down To The Waterline",
+		Album: "Dire Straits"})
+
+	if !waitFor(t, time.Second, func() bool { _, s := h.sub.counts(); return s == 1 }) {
+		t.Fatal("completed track never scrobbled")
+	}
+	if got := h.sub.lastScrobble(); got.Album != "Dire Straits" {
+		t.Errorf("scrobbled without album: %+v", got)
+	}
+}
+
 func TestBlockedHostnameDropped(t *testing.T) {
 	h := newHarness(t, func(c *config.Config) {
 		c.Players.BlockedHostnames = []string{"youtube.com"}
