@@ -55,9 +55,10 @@ func Retryable(err error) bool {
 	}
 	var apiErr *APIError
 	if errors.As(err, &apiErr) {
-		switch apiErr.Code {
-		case 11, 29: // service offline, rate limit
-			return true
+		// A service error code decides alone (last.fm serves e.g. code 9
+		// "invalid session" with HTTP 403 — that is not retryable).
+		if apiErr.Code != 0 {
+			return apiErr.Code == 11 || apiErr.Code == 29 // service offline, rate limit
 		}
 		switch apiErr.HTTPStatus {
 		case 403, 429, 500, 502, 503:
