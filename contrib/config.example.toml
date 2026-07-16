@@ -1,0 +1,46 @@
+# panobble configuration — copy to ~/.config/panobble/config.toml
+
+[lastfm]
+# Create an API account at https://www.last.fm/api/account/create
+api_key = ""
+api_secret = ""
+
+[scrobble]
+# Scrobble at delay_percent% of the track, capped at delay_max_secs.
+delay_percent = 50
+delay_max_secs = 240
+min_duration_secs = 30
+now_playing = true
+
+[players]
+# Run `panobble players` while your player is open to discover ids.
+# The org.mpris.MediaPlayer2. prefix is optional.
+allowed = []
+# Apps whose tracks are dropped when album metadata is missing
+# (heuristic: YouTube videos have no album, YT Music tracks do).
+require_album = []
+# Hostnames (from the player's xesam:url, www. stripped) never to scrobble.
+blocked_hostnames = []
+
+[cleanup]
+# parse_title: parse "Artist - Track" from video titles on youtube.com;
+#              skips the scrobble when parsing fails.
+# parse_title_with_fallback: same on music.youtube.com, keeps the original
+#                            title when parsing fails.
+# remastered / explicit / single_ep / album_ver: strip those suffixes.
+presets = ["parse_title", "parse_title_with_fallback", "remastered", "explicit", "single_ep"]
+# Extra apps (beyond the YouTube hosts) whose titles should be parsed.
+parse_title_apps = []
+
+# User regex rules (RE2 syntax), applied in order before the presets.
+# Fields: track, artist, album, albumArtist.
+#[[rule]]
+#name = "strip feat"
+#search = { track = '\s*\(feat\. [^)]*\)$' }
+#replacement = { track = "" }
+#continue_matching = true
+
+#[[rule]]
+#name = "never scrobble asmr"
+#search = { track = '(?:^|\s)asmr(?:\s|$)' }
+#block = true
