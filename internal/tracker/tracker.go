@@ -36,13 +36,13 @@ type Submitter interface {
 
 const (
 	timerMeta     = iota // meta debounce: clean + now-playing
-	timerScrobble        // scrobble threshold crossed
+	timerScrobble        // threshold crossed: qualify, hold the commit until track end
 )
 
 type timerEvent struct {
 	busName string
 	gen     uint64
-	kind    int // timerMeta or timerScrobble
+	kind    int
 }
 
 type Tracker struct {
@@ -261,7 +261,7 @@ func (tr *Tracker) playbackStateChanged(p *player, status mpris.PlaybackStatus, 
 			}
 
 			if p.hash != p.lastScrobbleHash || (position >= 0 && isPossiblyAtStart) {
-				p.resetPlayClock(tr.now()) // a fresh play of the track
+				p.resetPlayClock(tr.now())
 			}
 
 			armed := p.scrobbleTimer != nil
@@ -350,7 +350,7 @@ func (tr *Tracker) handleTimerEvent(te timerEvent) {
 	}
 
 	switch te.kind {
-	case timerMeta: // clean + now-playing
+	case timerMeta:
 		if p.scrobbled != statePrepared {
 			return
 		}
@@ -367,7 +367,7 @@ func (tr *Tracker) handleTimerEvent(te timerEvent) {
 		}
 		p.scrobbled = stateNowPlayingSubmitted
 
-	case timerScrobble: // threshold crossed: qualify, hold the commit until track end
+	case timerScrobble:
 		if p.scrobbled != statePrepared && p.scrobbled != stateNowPlayingSubmitted {
 			return
 		}

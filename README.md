@@ -35,21 +35,25 @@ systemctl --user enable --now panobble
 | `panobble players` | list current MPRIS players and their config ids |
 | `panobble parse [--host H] ARTIST TITLE [ALBUM]` | dry-run the cleanup pipeline |
 | `panobble pending [--flush]` | list / submit queued offline scrobbles |
+| `panobble version` | print the version |
 
 Set `PANOBBLE_DEBUG=1` for debug logs.
 
 ## How it decides what to scrobble
 
 - Only players in `[players].allowed` (ids normalized: chromium's
-  `.instanceNNN` suffix is stripped).
-- A track *qualifies* after `min(50% of its duration, 4 min)`, minimum 30s,
-  with pause time accounted. The scrobble is committed when the play actually
+  `.instanceNNN` suffix is stripped). Hostnames in
+  `[players].blocked_hostnames` never scrobble.
+- A track *qualifies* after `min(50% of its duration, 4 min)`, minimum 30s
+  (also the delay when the duration is unknown); paused time doesn't count.
+  The scrobble is committed when the play actually
   ends — track change, stop, player exit, replay, or daemon shutdown — so
   last.fm never shows a track as both scrobbled and now-playing. Qualified
   tracks are journaled on disk, so a crash before the commit loses nothing.
 - Tracks are cleaned first: placeholder metadata dropped, `(2004 Remaster)`
   and `(Explicit)` suffixes stripped, YouTube video titles parsed into
-  artist/track, then your `[[rule]]` regex edits.
+  artist/track, then your `[[rule]]` regex edits —
+  `contrib/config.example.toml` has examples, including block rules.
 - By default a track only scrobbles when artist, title **and album** are all
   present (`require_album`, on by default) — the heuristic that skips
   YouTube *videos* while scrobbling YT Music. Turn it off if your players

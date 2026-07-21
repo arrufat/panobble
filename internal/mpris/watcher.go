@@ -35,7 +35,7 @@ type Event struct {
 
 	// Position at the time of a status change, -1 if unavailable.
 	Position time.Duration
-	// Only fetched for Status events (feeds the Spotify ad heuristic).
+	// Only set for Status events.
 	CanGoNext bool
 }
 
