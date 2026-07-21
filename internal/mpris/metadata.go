@@ -137,6 +137,13 @@ func (md Metadata) IsSpotifyAd() bool {
 		md.Album == ""
 }
 
+// IsSpotifyAdPlayback detects Spotify ads by their playback shape: an
+// unskippable track with no album and no track number.
+func (md Metadata) IsSpotifyAdPlayback(appID string, canGoNext bool) bool {
+	return !canGoNext && strings.Contains(appID, "spotify") &&
+		md.Album == "" && md.TrackNumber == 0
+}
+
 func str(m map[string]dbus.Variant, key string) string {
 	if v, ok := m[key]; ok {
 		if s, ok := v.Value().(string); ok {

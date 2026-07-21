@@ -23,28 +23,26 @@ import (
 
 const defaultAPIRoot = "https://ws.audioscrobbler.com/2.0/"
 
-// APIRoot returns the API root, overridable for tests and fault injection.
-func APIRoot() string {
-	if r := os.Getenv("PANOBBLE_LASTFM_ROOT"); r != "" {
-		return r
-	}
-	return defaultAPIRoot
-}
-
 type Client struct {
 	APIKey     string
 	APISecret  string
 	SessionKey string // empty until authenticated
 	HTTP       *http.Client
 	UserAgent  string
+	BaseURL    string
 }
 
 func NewClient(apiKey, apiSecret string) *Client {
+	baseURL := os.Getenv("PANOBBLE_LASTFM_ROOT") // test/fault-injection override
+	if baseURL == "" {
+		baseURL = defaultAPIRoot
+	}
 	return &Client{
 		APIKey:    apiKey,
 		APISecret: apiSecret,
 		HTTP:      &http.Client{Timeout: 30 * time.Second},
 		UserAgent: "panobble",
+		BaseURL:   baseURL,
 	}
 }
 
@@ -80,7 +78,7 @@ func (c *Client) post(ctx context.Context, params map[string]string, out any) er
 	form.Set("api_sig", c.sign(params))
 	form.Set("format", "json")
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, APIRoot(),
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.BaseURL,
 		strings.NewReader(form.Encode()))
 	if err != nil {
 		return err

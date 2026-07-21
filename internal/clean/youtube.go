@@ -14,25 +14,15 @@ func ParseYoutubeTitle(videoTitle string) (artist, track string) {
 		title = r.apply(title)
 	}
 
-	for _, e := range extractorsPre {
-		if m := e.re.FindStringSubmatch(title); m != nil {
-			artist = m[e.artistGroup]
-			track = m[e.trackGroup]
-			break
-		}
-	}
+	artist, track, _ = runExtractors(extractorsPre, title)
 
 	if artist == "" || track == "" {
 		artist, track = splitString(title)
 	}
 
 	if artist == "" || track == "" {
-		for _, e := range extractorsPost {
-			if m := e.re.FindStringSubmatch(title); m != nil {
-				artist = m[e.artistGroup]
-				track = m[e.trackGroup]
-				break
-			}
+		if a, t, ok := runExtractors(extractorsPost, title); ok {
+			artist, track = a, t
 		}
 	}
 
@@ -45,6 +35,17 @@ func ParseYoutubeTitle(videoTitle string) (artist, track string) {
 		artist = cleanYoutubeArtist(artist)
 	}
 	return artist, track
+}
+
+// runExtractors returns the artist/track groups of the first matching
+// extractor; ok reports whether any matched.
+func runExtractors(es []compiledExtractor, title string) (artist, track string, ok bool) {
+	for _, e := range es {
+		if m := e.re.FindStringSubmatch(title); m != nil {
+			return m[e.artistGroup], m[e.trackGroup], true
+		}
+	}
+	return "", "", false
 }
 
 // CleanYoutubeTrack strips YouTube suffixes/prefixes from a track title.

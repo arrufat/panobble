@@ -1,6 +1,7 @@
 package clean
 
 import (
+	"slices"
 	"strings"
 	"unicode"
 	"unicode/utf8"
@@ -43,7 +44,7 @@ func (p *Pipeline) applyPresets(t scrobble.Track, host string, dataIsEdited bool
 		if !p.presetEnabled[preset.name] {
 			continue
 		}
-		if len(preset.hosts) > 0 && !contains(preset.hosts, host) {
+		if len(preset.hosts) > 0 && !slices.Contains(preset.hosts, host) {
 			continue
 		}
 		if nt, ok := applyRegexPreset(t, preset); ok {
@@ -61,7 +62,7 @@ func (p *Pipeline) applyPresets(t scrobble.Track, host string, dataIsEdited bool
 func (p *Pipeline) applyParseTitle(t scrobble.Track, host, presetName string) (out scrobble.Track, changed, parseFailed bool) {
 	strict := presetName == "parse_title"
 
-	applies := contains(p.parseTitleApps, t.AppID) ||
+	applies := slices.Contains(p.parseTitleApps, t.AppID) ||
 		(strict && host == hostYoutube) ||
 		(!strict && host == hostYoutubeMusic)
 	if !applies {
@@ -77,7 +78,6 @@ func (p *Pipeline) applyParseTitle(t scrobble.Track, host, presetName string) (o
 		if artist != "" && track != "" {
 			t.Artist = artist
 			t.Title = track
-			t.Album = ""
 			t.AlbumArtist = ""
 			return t, true, false
 		}
@@ -162,13 +162,4 @@ func fieldValue(t *scrobble.Track, field string) *string {
 		return &t.AlbumArtist
 	}
 	panic("clean: unknown field " + field)
-}
-
-func contains(ss []string, s string) bool {
-	for _, v := range ss {
-		if v == s {
-			return true
-		}
-	}
-	return false
 }

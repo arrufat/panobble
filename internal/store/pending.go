@@ -219,6 +219,7 @@ func (q *Queue) Flush(ctx context.Context, s scrobble.Scrobbler) error {
 	}
 
 	var flushErr error
+flush:
 	for start := 0; start < len(eligible); start += batchSize {
 		end := min(start+batchSize, len(eligible))
 		batch := eligible[start:end]
@@ -246,10 +247,7 @@ func (q *Queue) Flush(ctx context.Context, s scrobble.Scrobbler) error {
 			keep = append(keep, batch...)
 			keep = append(keep, eligible[end:]...)
 			flushErr = err
-			start = len(eligible) // break
-		}
-		if flushErr != nil {
-			break
+			break flush
 		}
 	}
 
@@ -259,9 +257,8 @@ func (q *Queue) Flush(ctx context.Context, s scrobble.Scrobbler) error {
 	return flushErr
 }
 
-// rewrite atomically replaces the queue file with the given entries, keeping
-// the lock on the original fd (the rename swaps content under the same path;
-// subsequent appends reopen semantics are avoided by truncating instead).
+// rewrite replaces the queue file's content in place (truncate + write),
+// keeping the flock on the original fd.
 func (q *Queue) rewrite(entries []Pending) error {
 	if err := q.f.Truncate(0); err != nil {
 		return err
@@ -300,11 +297,4 @@ func truncate(s string, n int) string {
 		return s
 	}
 	return s[:n]
-}
-
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
 }

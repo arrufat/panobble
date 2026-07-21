@@ -22,13 +22,19 @@ func newLastfmClient(cfg config.Config) (*lastfm.Client, error) {
 	return c, nil
 }
 
-// authedClient loads the config and stored session.
-func authedClient() (*lastfm.Client, config.Config, error) {
+// unauthedClient loads the config and builds a client without a session.
+func unauthedClient() (*lastfm.Client, config.Config, error) {
 	cfg, err := config.Load()
 	if err != nil {
 		return nil, cfg, err
 	}
 	client, err := newLastfmClient(cfg)
+	return client, cfg, err
+}
+
+// authedClient loads the config and stored session.
+func authedClient() (*lastfm.Client, config.Config, error) {
+	client, cfg, err := unauthedClient()
 	if err != nil {
 		return nil, cfg, err
 	}
@@ -45,11 +51,7 @@ func authedClient() (*lastfm.Client, config.Config, error) {
 }
 
 func cmdAuth(args []string) error {
-	cfg, err := config.Load()
-	if err != nil {
-		return err
-	}
-	client, err := newLastfmClient(cfg)
+	client, _, err := unauthedClient()
 	if err != nil {
 		return err
 	}

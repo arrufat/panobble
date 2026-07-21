@@ -63,6 +63,14 @@ func trackHash(md mpris.Metadata, appID, busName string) uint64 {
 	return h.Sum64()
 }
 
+// resetPlayClock starts a fresh play: accumulated time is dropped and both
+// the scrobble timestamp and the pause-accounting baseline restart at now.
+func (p *player) resetPlayClock(now time.Time) {
+	p.timePlayed = 0
+	p.playStartTime = now
+	p.startedAt = now
+}
+
 func (p *player) rawTrack(timestamp time.Time) scrobble.Track {
 	return scrobble.Track{
 		Artist:      p.md.Artist,

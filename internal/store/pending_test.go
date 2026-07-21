@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"errors"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -143,7 +144,7 @@ func TestDeferredJournalLifecycle(t *testing.T) {
 	if err := q.ResolveDeferred(tr); err != nil {
 		t.Fatal(err)
 	}
-	entries, _ := ListPending(q.path[:len(q.path)-len("/pending.jsonl")])
+	entries, _ := ListPending(filepath.Dir(q.path))
 	if len(entries) != 0 {
 		t.Fatalf("journal entry should be gone, got %v", entries)
 	}

@@ -34,7 +34,8 @@ type Event struct {
 	Removed  bool            // player disappeared
 
 	// Position at the time of a status change, -1 if unavailable.
-	Position  time.Duration
+	Position time.Duration
+	// Only fetched for Status events (feeds the Spotify ad heuristic).
 	CanGoNext bool
 }
 
@@ -173,11 +174,9 @@ func (w *Watcher) Run() error {
 		}
 		if md, status, err := w.Snapshot(p.BusName); err == nil {
 			appID := NormalizeAppID(p.BusName)
-			mdCopy := md
-			w.events <- Event{BusName: p.BusName, AppID: appID, Metadata: &mdCopy,
-				Position: -1, CanGoNext: w.CanGoNext(p.BusName)}
-			statusCopy := status
-			w.events <- Event{BusName: p.BusName, AppID: appID, Status: &statusCopy,
+			w.events <- Event{BusName: p.BusName, AppID: appID, Metadata: &md,
+				Position: -1}
+			w.events <- Event{BusName: p.BusName, AppID: appID, Status: &status,
 				Position: w.Position(p.BusName), CanGoNext: w.CanGoNext(p.BusName)}
 		}
 	}
@@ -233,7 +232,7 @@ func (w *Watcher) handleSignal(sig *dbus.Signal) {
 			if m, ok := v.Value().(map[string]dbus.Variant); ok {
 				md := metadataFromMap(m)
 				w.events <- Event{BusName: busName, AppID: appID, Metadata: &md,
-					Position: -1, CanGoNext: w.CanGoNext(busName)}
+					Position: -1}
 			}
 		}
 		if v, ok := changed["PlaybackStatus"]; ok {

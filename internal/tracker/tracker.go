@@ -10,7 +10,7 @@ package tracker
 import (
 	"context"
 	"log/slog"
-	"strings"
+	"slices"
 	"time"
 
 	"github.com/arrufat/panobble/internal/clean"
@@ -34,10 +34,15 @@ type Submitter interface {
 	Scrobble(t scrobble.Track)
 }
 
+const (
+	timerMeta     = iota // meta debounce: clean + now-playing
+	timerScrobble        // scrobble threshold crossed
+)
+
 type timerEvent struct {
 	busName string
 	gen     uint64
-	kind    int // 0 = meta debounce, 1 = scrobble
+	kind    int // timerMeta or timerScrobble
 }
 
 type Tracker struct {
@@ -145,9 +150,7 @@ func (tr *Tracker) handleMprisEvent(ev mpris.Event) {
 		if *ev.SeekedTo < tr.startPosLimit && p.isPlaying &&
 			p.scrobbled >= stateQualified && p.scrobbled != stateCancelled {
 			tr.commit(p)
-			p.timePlayed = 0
-			p.playStartTime = tr.now()
-			p.startedAt = p.playStartTime
+			p.resetPlayClock(tr.now())
 			p.scrobbled = stateNone
 			tr.arm(p)
 		}
@@ -204,7 +207,7 @@ func (tr *Tracker) shouldIgnore(p *player, md mpris.Metadata) bool {
 	if md.Artist == "" || md.Title == "" {
 		return true
 	}
-	if md.URLHost != "" && contains(tr.cfg.Players.BlockedHostnames, md.URLHost) {
+	if md.URLHost != "" && slices.Contains(tr.cfg.Players.BlockedHostnames, md.URLHost) {
 		tr.log.Info("ignoring blocked hostname", "host", md.URLHost)
 		return true
 	}
@@ -226,10 +229,7 @@ func (tr *Tracker) playbackStateChanged(p *player, status mpris.PlaybackStatus, 
 		return
 	}
 
-	// Spotify ad heuristic (playback variant).
-	if status == mpris.StatusPlaying && !canGoNext &&
-		strings.Contains(p.appID, "spotify") &&
-		p.md.Album == "" && p.md.TrackNumber == 0 {
+	if status == mpris.StatusPlaying && p.md.IsSpotifyAdPlayback(p.appID, canGoNext) {
 		tr.log.Info("ignoring spotify ad (playback)")
 		tr.cancel(p)
 		return
@@ -261,9 +261,7 @@ func (tr *Tracker) playbackStateChanged(p *player, status mpris.PlaybackStatus, 
 			}
 
 			if p.hash != p.lastScrobbleHash || (position >= 0 && isPossiblyAtStart) {
-				p.timePlayed = 0
-				p.playStartTime = tr.now()
-				p.startedAt = p.playStartTime // a fresh play of the track
+				p.resetPlayClock(tr.now()) // a fresh play of the track
 			}
 
 			armed := p.scrobbleTimer != nil
@@ -336,10 +334,10 @@ func (tr *Tracker) arm(p *player) {
 	gen := p.timerGen
 	bus := p.busName
 	p.metaTimer = time.AfterFunc(tr.metaWait, func() {
-		tr.timerCh <- timerEvent{busName: bus, gen: gen, kind: 0}
+		tr.timerCh <- timerEvent{busName: bus, gen: gen, kind: timerMeta}
 	})
 	p.scrobbleTimer = time.AfterFunc(delay, func() {
-		tr.timerCh <- timerEvent{busName: bus, gen: gen, kind: 1}
+		tr.timerCh <- timerEvent{busName: bus, gen: gen, kind: timerScrobble}
 	})
 
 	tr.log.Debug("armed", "title", p.md.Title, "delay", delay, "timePlayed", p.timePlayed)
@@ -352,19 +350,12 @@ func (tr *Tracker) handleTimerEvent(te timerEvent) {
 	}
 
 	switch te.kind {
-	case 0: // meta debounce: clean + now-playing
+	case timerMeta: // clean + now-playing
 		if p.scrobbled != statePrepared {
 			return
 		}
-		cleaned, res := tr.pipeline.Clean(p.rawTrack(p.startedAt), p.urlHost)
-		switch {
-		case res.Blocked:
-			tr.log.Info("blocked by rule", "rule", res.BlockReason, "title", p.md.Title)
-			tr.cancel(p)
-			return
-		case res.ParseFailed:
-			tr.log.Info("title parse failed, skipping", "title", p.md.Title)
-			tr.cancel(p)
+		cleaned, ok := tr.cleanCurrent(p)
+		if !ok {
 			return
 		}
 		p.cleaned = cleaned
@@ -376,16 +367,15 @@ func (tr *Tracker) handleTimerEvent(te timerEvent) {
 		}
 		p.scrobbled = stateNowPlayingSubmitted
 
-	case 1: // threshold crossed: qualify, hold the commit until track end
+	case timerScrobble: // threshold crossed: qualify, hold the commit until track end
 		if p.scrobbled != statePrepared && p.scrobbled != stateNowPlayingSubmitted {
 			return
 		}
 		t := p.cleaned
 		if t.Title == "" {
 			// meta debounce hasn't run (sub-second delay); clean now.
-			cleaned, res := tr.pipeline.Clean(p.rawTrack(p.startedAt), p.urlHost)
-			if res.Blocked || res.ParseFailed {
-				tr.cancel(p)
+			cleaned, ok := tr.cleanCurrent(p)
+			if !ok {
 				return
 			}
 			t = cleaned
@@ -396,6 +386,23 @@ func (tr *Tracker) handleTimerEvent(te timerEvent) {
 		tr.log.Info("qualified", "artist", t.Artist, "title", t.Title)
 		tr.submitter.Qualified(t)
 	}
+}
+
+// cleanCurrent runs the cleanup pipeline on the player's current track,
+// cancelling the play when a rule blocks it or the title parse fails.
+func (tr *Tracker) cleanCurrent(p *player) (scrobble.Track, bool) {
+	cleaned, res := tr.pipeline.Clean(p.rawTrack(p.startedAt), p.urlHost)
+	switch {
+	case res.Blocked:
+		tr.log.Info("blocked by rule", "rule", res.BlockReason, "title", p.md.Title)
+		tr.cancel(p)
+		return scrobble.Track{}, false
+	case res.ParseFailed:
+		tr.log.Info("title parse failed, skipping", "title", p.md.Title)
+		tr.cancel(p)
+		return scrobble.Track{}, false
+	}
+	return cleaned, true
 }
 
 // shouldSendNowPlaying suppresses the resend when the same track resumed
@@ -411,13 +418,4 @@ func (tr *Tracker) shouldSendNowPlaying(p *player) bool {
 		}
 	}
 	return tr.now().Sub(p.npSentAt) > window
-}
-
-func contains(ss []string, s string) bool {
-	for _, v := range ss {
-		if v == s {
-			return true
-		}
-	}
-	return false
 }

@@ -3,6 +3,7 @@ package clean
 import (
 	"fmt"
 	"regexp"
+	"slices"
 
 	"github.com/arrufat/panobble/internal/config"
 	"github.com/arrufat/panobble/internal/scrobble"
@@ -39,7 +40,7 @@ func compileUserRules(rules []config.Rule) ([]userRule, error) {
 			if pattern == "" {
 				continue
 			}
-			if !contains(ruleFields, field) {
+			if !slices.Contains(ruleFields, field) {
 				return nil, fmt.Errorf("rule %q: unknown field %q", r.Name, field)
 			}
 			p := pattern
@@ -70,10 +71,10 @@ func (p *Pipeline) applyUserRules(t scrobble.Track, host string) (scrobble.Track
 
 	for i := range p.userRules {
 		rule := &p.userRules[i]
-		if len(rule.apps) > 0 && !contains(rule.apps, t.AppID) {
+		if len(rule.apps) > 0 && !slices.Contains(rule.apps, t.AppID) {
 			continue
 		}
-		if len(rule.hosts) > 0 && !contains(rule.hosts, host) {
+		if len(rule.hosts) > 0 && !slices.Contains(rule.hosts, host) {
 			continue
 		}
 
