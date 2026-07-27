@@ -3,9 +3,10 @@
   "presets": [
     {
       "name": "remastered",
+      "_note": "diverges from upstream: when the remaster suffix is dash/slash-separated inside brackets ('1999 (7\" Stereo Edit - 2019 Remaster)'), the closing bracket belongs to group 1 and is restored via $2 instead of being swallowed",
       "fields": ["track", "album"],
-      "pattern": "^(.+) [(\\[\\/\\-][^()\\[\\]]*?re-?mastere?d?[^)\\[\\]]*?([)\\]\\-\\/]|$)",
-      "replacement": "$1"
+      "pattern": "^(.+) (?:[(\\[][^()\\[\\]]*?re-?mastere?d?[^)\\[\\]]*?(?:[)\\]\\-\\/]|$)|[\\-\\/][^()\\[\\]]*?re-?mastere?d?(?:[^()\\[\\]]*?([)\\]])|[^()\\[\\]]*?[\\-\\/]|.*$))",
+      "replacement": "$1$2"
     },
     {
       "name": "single_ep",
@@ -16,16 +17,18 @@
     },
     {
       "name": "explicit",
+      "_note": "diverges from upstream like 'remastered': a dash/slash-separated suffix inside brackets keeps its closing bracket via $2",
       "fields": ["track", "album"],
-      "pattern": "^(.*) (- |\\(|\\[|\\/)(explicit|clean)( .*?version| edit(ed)?)?[\\)\\]]?$",
-      "replacement": "$1",
+      "pattern": "^(.*) (?:[(\\[](?:explicit|clean)(?: .*?version| edit(?:ed)?)?[)\\]]?$|(?:- |\\/)(?:explicit|clean)(?: [^()\\[\\]]*?version| edit(?:ed)?)?([)\\]])?$|(?:- |\\/)(?:explicit|clean)(?: .*?version| edit(?:ed)?)?[)\\]]?$)",
+      "replacement": "$1$2",
       "edge_symbol": "🅴"
     },
     {
       "name": "album_ver",
+      "_note": "diverges from upstream like 'remastered': a dash/slash-separated suffix inside brackets keeps its closing bracket via $2",
       "fields": ["track"],
-      "pattern": "^(.*) (- |\\(|\\[|\\/)(.+ )?album (.*?version|edit(ed)?).*?[\\)\\]]?$",
-      "replacement": "$1"
+      "pattern": "^(.*) (?:[(\\[](?:.+ )?album (?:.*?version|edit(?:ed)?).*?[)\\]]?$|(?:- |\\/)(?:.+ )?album (?:.*?version|edit(?:ed)?)(?:[^()\\[\\]]*?([)\\]])|.*?)$)",
+      "replacement": "$1$2"
     }
   ]
 }

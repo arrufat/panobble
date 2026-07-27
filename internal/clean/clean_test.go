@@ -25,6 +25,13 @@ func TestPresetRemastered(t *testing.T) {
 		{"Song - 2004 remaster", "Song"},
 		{"Song / Remastered", "Song"},
 		{"Remaster Class", "Remaster Class"}, // no false positive
+		// dash/slash-separated remaster inside brackets: the closing
+		// bracket must survive
+		{`1999 (7" Stereo Edit - 2019 Remaster)`, `1999 (7" Stereo Edit)`},
+		{"Song (Live / 2011 Remaster)", "Song (Live)"},
+		{"Song [Mono Mix - Remastered]", "Song [Mono Mix]"},
+		{"Time (Clock of the Heart) - Remastered", "Time (Clock of the Heart)"},
+		{"Song (Blah) - Remastered (Live)", "Song (Blah)"},
 	}
 	for _, c := range cases {
 		got, res := p.Clean(scrobble.Track{Artist: "A", Title: c.in, Album: "Album"}, "")
@@ -51,6 +58,9 @@ func TestPresetExplicit(t *testing.T) {
 		{"Song (Explicit)", "Song"},
 		{"Song - Explicit", "Song"},
 		{"Song [Clean]", "Song"},
+		{`Song (7" Edit - Explicit)`, `Song (7" Edit)`},
+		{"Song (Radio Edit - Clean)", "Song (Radio Edit)"},
+		{"Song - Clean (radio) version", "Song"},
 		{"Song 🅴", "Song"}, // adjacent space removed by the pipeline's final trim
 		{"🅴 Song", "Song"},
 		{"Song🅴", "Song🅴"}, // no whitespace boundary: untouched
@@ -59,6 +69,28 @@ func TestPresetExplicit(t *testing.T) {
 		got, _ := p.Clean(scrobble.Track{Artist: "A", Title: c.in}, "")
 		if got.Title != c.want {
 			t.Errorf("explicit(%q) = %q, want %q", c.in, got.Title, c.want)
+		}
+	}
+}
+
+func TestPresetAlbumVer(t *testing.T) {
+	cleanup := config.Default().Cleanup
+	cleanup.Presets = append(cleanup.Presets, "album_ver")
+	p, err := NewPipeline(cleanup, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cases := []struct{ in, want string }{
+		{"Song (Album Version)", "Song"},
+		{"Song - album version", "Song"},
+		{"Song (2004 Album Edit)", "Song"},
+		{`Song (7" Mix - Album Version)`, `Song (7" Mix)`},
+		{"Song - x album version (live)", "Song"},
+	}
+	for _, c := range cases {
+		got, _ := p.Clean(scrobble.Track{Artist: "A", Title: c.in}, "")
+		if got.Title != c.want {
+			t.Errorf("album_ver(%q) = %q, want %q", c.in, got.Title, c.want)
 		}
 	}
 }
