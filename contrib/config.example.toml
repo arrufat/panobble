@@ -1,9 +1,17 @@
 # panobble configuration — copy to ~/.config/panobble/config.toml
 
+# At least one scrobble target must be configured; both work simultaneously.
+
 [lastfm]
 # Create an API account at https://www.last.fm/api/account/create
 api_key = ""
 api_secret = ""
+
+[listenbrainz]
+# Your user token from https://listenbrainz.org/settings/
+token = ""
+# For self-hosted instances or Maloja's ListenBrainz-compatible endpoint.
+#api_url = "https://api.listenbrainz.org/"
 
 [scrobble]
 # Scrobble at delay_percent% of the track, capped at delay_max_secs.

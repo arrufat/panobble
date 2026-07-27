@@ -8,6 +8,8 @@ import (
 
 	"github.com/arrufat/panobble/internal/config"
 	"github.com/arrufat/panobble/internal/lastfm"
+	"github.com/arrufat/panobble/internal/listenbrainz"
+	"github.com/arrufat/panobble/internal/scrobble"
 	"github.com/arrufat/panobble/internal/store"
 )
 
@@ -32,22 +34,47 @@ func unauthedClient() (*lastfm.Client, config.Config, error) {
 	return client, cfg, err
 }
 
-// authedClient loads the config and stored session.
-func authedClient() (*lastfm.Client, config.Config, error) {
-	client, cfg, err := unauthedClient()
+// authedLastfm builds the Last.fm client with the stored session.
+func authedLastfm(cfg config.Config) (*lastfm.Client, error) {
+	client, err := newLastfmClient(cfg)
 	if err != nil {
-		return nil, cfg, err
+		return nil, err
 	}
 	dataDir, err := config.DataDir()
 	if err != nil {
-		return nil, cfg, err
+		return nil, err
 	}
 	sess, err := store.LoadSession(dataDir)
 	if err != nil {
-		return nil, cfg, errors.New("not logged in — run: panobble auth")
+		return nil, errors.New("not logged in — run: panobble auth")
 	}
 	client.SessionKey = sess.SessionKey
-	return client, cfg, nil
+	return client, nil
+}
+
+// backends assembles the configured scrobble targets: Last.fm when api_key
+// is set (needs a stored session), ListenBrainz when a token is set.
+func backends(cfg config.Config) ([]scrobble.Scrobbler, error) {
+	var out []scrobble.Scrobbler
+	if cfg.Lastfm.APIKey != "" || cfg.Lastfm.APISecret != "" {
+		client, err := authedLastfm(cfg)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, client)
+	}
+	if cfg.Listenbrainz.Token != "" {
+		lb := listenbrainz.NewClient(cfg.Listenbrainz.Token, cfg.Listenbrainz.APIURL)
+		lb.UserAgent = "panobble " + version
+		lb.ClientVersion = version
+		out = append(out, lb)
+	}
+	if len(out) == 0 {
+		path, _ := config.Path()
+		return nil, fmt.Errorf(
+			"no scrobble targets configured — set [lastfm] api_key/api_secret and/or [listenbrainz] token in %s", path)
+	}
+	return out, nil
 }
 
 func cmdAuth(args []string) error {

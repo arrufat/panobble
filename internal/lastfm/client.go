@@ -105,6 +105,7 @@ func (c *Client) post(ctx context.Context, params map[string]string, out any) er
 	}
 	if json.Unmarshal(body, &apiErr) == nil && apiErr.Error != 0 {
 		return &scrobble.APIError{
+			Class:      classify(apiErr.Error),
 			Code:       apiErr.Error,
 			HTTPStatus: resp.StatusCode,
 			Message:    fmt.Sprintf("last.fm error %d: %s", apiErr.Error, apiErr.Message),
@@ -120,4 +121,19 @@ func (c *Client) post(ctx context.Context, params map[string]string, out any) er
 		return nil
 	}
 	return json.Unmarshal(body, out)
+}
+
+// classify maps a last.fm error code onto the shared taxonomy. The code
+// decides alone: last.fm serves e.g. code 9 "invalid session" with HTTP 403,
+// which must not read as retryable.
+func classify(code int) scrobble.Class {
+	switch code {
+	case 11, 29: // service offline, rate limit
+		return scrobble.ClassRetryable
+	case 6, 7: // invalid parameters, invalid resource
+		return scrobble.ClassTerminal
+	case 9: // invalid session key
+		return scrobble.ClassNeedsReauth
+	}
+	return scrobble.ClassUnknown
 }

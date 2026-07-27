@@ -40,9 +40,22 @@ type Scrobbler interface {
 	Scrobble(ctx context.Context, ts []Track) error
 }
 
+// Class is a service client's own classification of an API error. Service
+// packages set it from their protocol knowledge (error codes, HTTP statuses);
+// ClassUnknown falls back to generic HTTP-status heuristics here.
+type Class int
+
+const (
+	ClassUnknown Class = iota
+	ClassRetryable
+	ClassTerminal
+	ClassNeedsReauth
+)
+
 // APIError is a service API error with the service's own error code.
 type APIError struct {
-	Code       int // service error code (last.fm "error" field), 0 if none
+	Class      Class
+	Code       int // service error code, 0 if none
 	HTTPStatus int
 	Message    string
 }
@@ -58,10 +71,8 @@ func Retryable(err error) bool {
 	}
 	var apiErr *APIError
 	if errors.As(err, &apiErr) {
-		// A service error code decides alone (last.fm serves e.g. code 9
-		// "invalid session" with HTTP 403 — that is not retryable).
-		if apiErr.Code != 0 {
-			return apiErr.Code == 11 || apiErr.Code == 29 // service offline, rate limit
+		if apiErr.Class != ClassUnknown {
+			return apiErr.Class == ClassRetryable
 		}
 		switch apiErr.HTTPStatus {
 		case 403, 429, 500, 502, 503:
@@ -75,20 +86,21 @@ func Retryable(err error) bool {
 }
 
 // Terminal reports whether the scrobble is permanently rejected and should
-// be dropped (last.fm codes 6, 7).
+// be dropped.
 func Terminal(err error) bool {
 	var apiErr *APIError
 	if errors.As(err, &apiErr) {
-		return apiErr.Code == 6 || apiErr.Code == 7
+		return apiErr.Class == ClassTerminal
 	}
 	return false
 }
 
-// NeedsReauth reports whether the session key is invalid (last.fm code 9).
+// NeedsReauth reports whether the credentials are invalid and the user must
+// re-authenticate.
 func NeedsReauth(err error) bool {
 	var apiErr *APIError
 	if errors.As(err, &apiErr) {
-		return apiErr.Code == 9
+		return apiErr.Class == ClassNeedsReauth
 	}
 	return false
 }

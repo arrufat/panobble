@@ -1,7 +1,8 @@
 # panobble
 
-A minimal MPRIS → Last.fm scrobbler daemon for Linux, porting the scrobbling
-core of [pano-scrobbler](https://github.com/kawaiiDango/pano-scrobbler):
+A minimal MPRIS scrobbler daemon for Linux, submitting to Last.fm and/or
+ListenBrainz. It ports the scrobbling core of
+[pano-scrobbler](https://github.com/kawaiiDango/pano-scrobbler):
 its metadata cleanup (YouTube title parsing, remaster/explicit stripping,
 user regex rules), scrobble timing rules, and offline queue — without the GUI.
 
@@ -13,13 +14,17 @@ go build -o ~/.local/bin/panobble ./cmd/panobble
 
 ## Setup
 
-1. Create a Last.fm API account: <https://www.last.fm/api/account/create>
-2. Copy `contrib/config.example.toml` to `~/.config/panobble/config.toml`
-   and fill in `api_key` / `api_secret`.
-3. Log in (opens a browser): `panobble auth`
-4. Discover your players and add them to `[players].allowed`:
+1. Copy `contrib/config.example.toml` to `~/.config/panobble/config.toml`
+   and configure at least one scrobble target (both work simultaneously):
+   - **Last.fm**: create an API account at
+     <https://www.last.fm/api/account/create>, fill in
+     `api_key` / `api_secret`, then log in (opens a browser): `panobble auth`
+   - **ListenBrainz**: paste your user token from
+     <https://listenbrainz.org/settings/> into `[listenbrainz].token`
+     (`api_url` supports self-hosted instances)
+2. Discover your players and add them to `[players].allowed`:
    `panobble players`
-5. Run it: `panobble daemon` — or install the systemd user unit:
+3. Run it: `panobble daemon` — or install the systemd user unit:
 
 ```sh
 cp contrib/panobble.service ~/.config/systemd/user/
@@ -59,7 +64,9 @@ Set `PANOBBLE_DEBUG=1` for debug logs.
   YouTube *videos* while scrobbling YT Music. Turn it off if your players
   report untagged files or radio streams.
 - Failed submissions queue in `$XDG_DATA_HOME/panobble/pending.jsonl` and
-  retry on start, hourly, and after the next successful scrobble.
+  retry on start, hourly, and after the next successful scrobble. Queue
+  entries are per service, so an outage at one target never blocks or
+  duplicates scrobbles at the other.
 
 ## Rule data
 

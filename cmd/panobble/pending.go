@@ -29,7 +29,7 @@ func cmdPending(args []string) error {
 			return nil
 		}
 		for _, p := range entries {
-			note := "failed: " + p.Reason
+			note := p.Service + " failed: " + p.Reason
 			if p.Deferred {
 				note = "awaiting commit"
 			}
@@ -41,7 +41,11 @@ func cmdPending(args []string) error {
 		return nil
 	}
 
-	client, _, err := authedClient()
+	cfg, err := config.Load()
+	if err != nil {
+		return err
+	}
+	targets, err := backends(cfg)
 	if err != nil {
 		return err
 	}
@@ -56,7 +60,7 @@ func cmdPending(args []string) error {
 		fmt.Println("no pending scrobbles")
 		return nil
 	}
-	if err := queue.Flush(context.Background(), client); err != nil {
+	if err := queue.Flush(context.Background(), targets); err != nil {
 		return fmt.Errorf("flush incomplete: %w", err)
 	}
 	after, _ := queue.Len()

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/arrufat/panobble/internal/config"
 	"github.com/arrufat/panobble/internal/scrobble"
 )
 
@@ -22,7 +23,11 @@ func cmdSubmit(args []string) error {
 		return fmt.Errorf("--artist and --track are required")
 	}
 
-	client, _, err := authedClient()
+	cfg, err := config.Load()
+	if err != nil {
+		return err
+	}
+	targets, err := backends(cfg)
 	if err != nil {
 		return err
 	}
@@ -35,16 +40,18 @@ func cmdSubmit(args []string) error {
 	}
 
 	ctx := context.Background()
-	if *np {
-		if err := client.NowPlaying(ctx, t); err != nil {
-			return err
+	for _, c := range targets {
+		if *np {
+			if err := c.NowPlaying(ctx, t); err != nil {
+				return fmt.Errorf("%s: %w", c.Name(), err)
+			}
+			fmt.Println(c.Name() + ": now playing sent")
+		} else {
+			if err := c.Scrobble(ctx, []scrobble.Track{t}); err != nil {
+				return fmt.Errorf("%s: %w", c.Name(), err)
+			}
+			fmt.Println(c.Name() + ": scrobbled")
 		}
-		fmt.Println("now playing sent")
-		return nil
 	}
-	if err := client.Scrobble(ctx, []scrobble.Track{t}); err != nil {
-		return err
-	}
-	fmt.Println("scrobbled")
 	return nil
 }

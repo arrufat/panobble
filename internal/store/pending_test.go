@@ -44,8 +44,8 @@ func TestEnqueueListFlush(t *testing.T) {
 	q := openTestQueue(t)
 	now := time.Now()
 
-	q.Enqueue(track("A", now.Add(-2*time.Hour)), "net down", true)
-	q.Enqueue(track("B", now.Add(-1*time.Hour)), "net down", true)
+	q.Enqueue(track("A", now.Add(-2*time.Hour)), "fake", "net down", true)
+	q.Enqueue(track("B", now.Add(-1*time.Hour)), "fake", "net down", true)
 
 	n, _ := q.Len()
 	if n != 2 {
@@ -53,7 +53,7 @@ func TestEnqueueListFlush(t *testing.T) {
 	}
 
 	fs := &fakeScrobbler{}
-	if err := q.Flush(context.Background(), fs); err != nil {
+	if err := q.Flush(context.Background(), []scrobble.Scrobbler{fs}); err != nil {
 		t.Fatal(err)
 	}
 	if len(fs.batches) != 1 || len(fs.batches[0]) != 2 {
@@ -72,11 +72,11 @@ func TestFlushKeepsFailedAndAborts(t *testing.T) {
 	q := openTestQueue(t)
 	now := time.Now()
 	for i := 0; i < 60; i++ { // 2 batches
-		q.Enqueue(track("A", now.Add(time.Duration(i-100)*time.Minute)), "x", true)
+		q.Enqueue(track("A", now.Add(time.Duration(i-100)*time.Minute)), "fake", "x", true)
 	}
 
 	fs := &fakeScrobbler{errs: []error{errors.New("boom")}}
-	err := q.Flush(context.Background(), fs)
+	err := q.Flush(context.Background(), []scrobble.Scrobbler{fs})
 	if err == nil {
 		t.Fatal("expected flush error")
 	}
@@ -91,7 +91,7 @@ func TestFlushKeepsFailedAndAborts(t *testing.T) {
 	// the never-attempted tail (10) stays force-retryable (pano only marks
 	// rows it actually submitted). A second flush thus submits only the tail.
 	fs2 := &fakeScrobbler{}
-	if err := q.Flush(context.Background(), fs2); err != nil {
+	if err := q.Flush(context.Background(), []scrobble.Scrobbler{fs2}); err != nil {
 		t.Fatal(err)
 	}
 	if len(fs2.batches) != 1 || len(fs2.batches[0]) != 10 {
@@ -106,11 +106,11 @@ func TestFlushDropsTerminalAndOld(t *testing.T) {
 	q := openTestQueue(t)
 	now := time.Now()
 
-	q.Enqueue(track("old", now.Add(-15*24*time.Hour)), "x", true) // > 14 days
-	q.Enqueue(track("bad", now.Add(-time.Hour)), "x", true)
+	q.Enqueue(track("old", now.Add(-15*24*time.Hour)), "fake", "x", true) // > 14 days
+	q.Enqueue(track("bad", now.Add(-time.Hour)), "fake", "x", true)
 
-	fs := &fakeScrobbler{errs: []error{&scrobble.APIError{Code: 6, Message: "invalid params"}}}
-	if err := q.Flush(context.Background(), fs); err != nil {
+	fs := &fakeScrobbler{errs: []error{&scrobble.APIError{Class: scrobble.ClassTerminal, Code: 6, Message: "invalid params"}}}
+	if err := q.Flush(context.Background(), []scrobble.Scrobbler{fs}); err != nil {
 		t.Fatal(err)
 	}
 	// old dropped without submission; bad submitted once, terminal, dropped
@@ -133,7 +133,7 @@ func TestDeferredJournalLifecycle(t *testing.T) {
 		t.Fatalf("deferred entries must not count as retryable, len = %d", n)
 	}
 	fs := &fakeScrobbler{}
-	if err := q.Flush(context.Background(), fs); err != nil {
+	if err := q.Flush(context.Background(), []scrobble.Scrobbler{fs}); err != nil {
 		t.Fatal(err)
 	}
 	if len(fs.batches) != 0 {
@@ -154,18 +154,73 @@ func TestPromoteDeferredRecoversAfterCrash(t *testing.T) {
 	q := openTestQueue(t)
 	q.AddDeferred(track("A", time.Now().Add(-time.Minute)))
 
-	n, err := q.PromoteDeferred()
+	n, err := q.PromoteDeferred([]string{"fake"})
 	if err != nil || n != 1 {
 		t.Fatalf("promoted %d, err %v", n, err)
 	}
 
 	// Promoted entries flush immediately (canForceRetry).
 	fs := &fakeScrobbler{}
-	if err := q.Flush(context.Background(), fs); err != nil {
+	if err := q.Flush(context.Background(), []scrobble.Scrobbler{fs}); err != nil {
 		t.Fatal(err)
 	}
 	if len(fs.batches) != 1 || fs.batches[0][0].Artist != "A" {
 		t.Fatalf("promoted entry not flushed: %v", fs.batches)
+	}
+}
+
+func TestFlushPerService(t *testing.T) {
+	q := openTestQueue(t)
+	now := time.Now()
+
+	q.Enqueue(track("A", now.Add(-2*time.Hour)), "fake", "x", true)
+	q.Enqueue(track("B", now.Add(-time.Hour)), "other", "x", true)
+
+	// Only the "fake" entry goes to the fake scrobbler; the "other" entry
+	// survives untouched while its service has no configured backend.
+	fs := &fakeScrobbler{}
+	if err := q.Flush(context.Background(), []scrobble.Scrobbler{fs}); err != nil {
+		t.Fatal(err)
+	}
+	if len(fs.batches) != 1 || len(fs.batches[0]) != 1 || fs.batches[0][0].Artist != "A" {
+		t.Fatalf("unexpected batches: %v", fs.batches)
+	}
+	entries, _ := ListPending(filepath.Dir(q.path))
+	if len(entries) != 1 || entries[0].Service != "other" {
+		t.Fatalf("unconfigured-service entry should survive, got %v", entries)
+	}
+}
+
+func TestLegacyEntriesDefaultToLastfm(t *testing.T) {
+	q := openTestQueue(t)
+	// An entry written before multi-service support has no service field.
+	q.append(Pending{Track: track("A", time.Now().Add(-time.Hour)),
+		LastFailed: time.Now(), CanForceRetry: true})
+
+	entries, err := q.list()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 1 || entries[0].Service != "lastfm" {
+		t.Fatalf("legacy entry should read as lastfm, got %+v", entries)
+	}
+}
+
+func TestPromoteDeferredFansOutPerService(t *testing.T) {
+	q := openTestQueue(t)
+	q.AddDeferred(track("A", time.Now().Add(-time.Minute)))
+
+	n, err := q.PromoteDeferred([]string{"fake", "other"})
+	if err != nil || n != 1 {
+		t.Fatalf("promoted %d, err %v", n, err)
+	}
+	entries, _ := ListPending(filepath.Dir(q.path))
+	if len(entries) != 2 {
+		t.Fatalf("expected one entry per service, got %v", entries)
+	}
+	services := map[string]bool{entries[0].Service: true, entries[1].Service: true}
+	if !services["fake"] || !services["other"] {
+		t.Errorf("services = %v", services)
 	}
 }
 

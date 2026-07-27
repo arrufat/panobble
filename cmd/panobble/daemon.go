@@ -7,9 +7,11 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/arrufat/panobble/internal/clean"
 	"github.com/arrufat/panobble/internal/config"
+	"github.com/arrufat/panobble/internal/listenbrainz"
 	"github.com/arrufat/panobble/internal/mpris"
 	"github.com/arrufat/panobble/internal/tracker"
 )
@@ -19,7 +21,11 @@ func cmdDaemon(args []string) error {
 		Level: logLevel(),
 	}))
 
-	client, cfg, err := authedClient()
+	cfg, err := config.Load()
+	if err != nil {
+		return err
+	}
+	targets, err := backends(cfg)
 	if err != nil {
 		return err
 	}
@@ -38,7 +44,7 @@ func cmdDaemon(args []string) error {
 		return err
 	}
 
-	sub, err := newSubmitter(client, dataDir, log)
+	sub, err := newSubmitter(targets, dataDir, log)
 	if err != nil {
 		return err
 	}
@@ -63,7 +69,24 @@ func cmdDaemon(args []string) error {
 	}()
 	go sub.flushLoop(ctx)
 
-	log.Info("panobble daemon started", "allowed", cfg.Players.Allowed)
+	// Best-effort token check so a bad token surfaces at startup, not at the
+	// first scrobble.
+	for _, b := range targets {
+		if lb, ok := b.(*listenbrainz.Client); ok {
+			go func() {
+				vctx, cancel := context.WithTimeout(ctx, time.Minute)
+				defer cancel()
+				if user, err := lb.ValidateToken(vctx); err != nil {
+					log.Warn("listenbrainz token validation failed", "err", err)
+				} else {
+					log.Info("listenbrainz token valid", "user", user)
+				}
+			}()
+		}
+	}
+
+	log.Info("panobble daemon started", "allowed", cfg.Players.Allowed,
+		"services", sub.serviceNames())
 	tr.Run(ctx, watcher.Events())
 	log.Info("panobble daemon stopped")
 	return nil

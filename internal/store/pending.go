@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -19,8 +20,13 @@ import (
 // or a qualified track whose commit is deferred until its play ends
 // (Deferred). Deferred entries are the crash journal — if the daemon dies
 // before committing, the next start promotes them to normal retries.
+//
+// Retry entries carry the service they failed on; deferred entries are
+// service-agnostic (never submitted anywhere) and fan out per service when
+// promoted.
 type Pending struct {
 	Track         scrobble.Track `json:"track"`
+	Service       string         `json:"service,omitempty"` // empty on deferred entries
 	LastFailed    time.Time      `json:"lastFailed"`
 	Reason        string         `json:"reason,omitempty"`
 	CanForceRetry bool           `json:"canForceRetry"` // network-retryable failure
@@ -67,11 +73,11 @@ func (q *Queue) Close() error {
 	return q.f.Close()
 }
 
-// Enqueue appends one failed scrobble.
-func (q *Queue) Enqueue(t scrobble.Track, reason string, canForceRetry bool) error {
+// Enqueue appends one failed scrobble for the given service.
+func (q *Queue) Enqueue(t scrobble.Track, service, reason string, canForceRetry bool) error {
 	q.mu.Lock()
 	defer q.mu.Unlock()
-	return q.append(Pending{Track: t, LastFailed: q.now(),
+	return q.append(Pending{Track: t, Service: service, LastFailed: q.now(),
 		Reason: truncate(reason, 100), CanForceRetry: canForceRetry})
 }
 
@@ -102,9 +108,9 @@ func (q *Queue) ResolveDeferred(t scrobble.Track) error {
 }
 
 // PromoteDeferred converts leftover deferred entries (a previous daemon died
-// before committing them) into immediately-retryable pendings. Returns how
-// many were promoted.
-func (q *Queue) PromoteDeferred() (int, error) {
+// before committing them) into immediately-retryable pendings, one per
+// configured service. Returns how many tracks were promoted.
+func (q *Queue) PromoteDeferred(services []string) (int, error) {
 	q.mu.Lock()
 	defer q.mu.Unlock()
 	all, err := q.list()
@@ -112,19 +118,27 @@ func (q *Queue) PromoteDeferred() (int, error) {
 		return 0, err
 	}
 	n := 0
-	for i := range all {
-		if all[i].Deferred {
-			all[i].Deferred = false
-			all[i].CanForceRetry = true
-			all[i].LastFailed = q.now()
-			all[i].Reason = "recovered after restart"
-			n++
+	var out []Pending
+	for _, p := range all {
+		if !p.Deferred {
+			out = append(out, p)
+			continue
+		}
+		n++
+		for _, svc := range services {
+			out = append(out, Pending{
+				Track:         p.Track,
+				Service:       svc,
+				LastFailed:    q.now(),
+				Reason:        "recovered after restart",
+				CanForceRetry: true,
+			})
 		}
 	}
 	if n == 0 {
 		return 0, nil
 	}
-	return n, q.rewrite(all)
+	return n, q.rewrite(out)
 }
 
 func (q *Queue) append(p Pending) error {
@@ -173,16 +187,20 @@ func readEntries(f *os.File) ([]Pending, error) {
 		if err := json.Unmarshal(line, &p); err != nil {
 			continue // skip corrupt lines rather than wedging the queue
 		}
+		if !p.Deferred && p.Service == "" {
+			p.Service = "lastfm" // entry from before multi-service support
+		}
 		out = append(out, p)
 	}
 	return out, sc.Err()
 }
 
-// Flush submits eligible queued scrobbles: oldest first, batches of 50,
-// at most 700 per run, aborting after the first failed batch. Entries older
-// than 14 days or terminally rejected are dropped. Survivors are rewritten
-// atomically.
-func (q *Queue) Flush(ctx context.Context, s scrobble.Scrobbler) error {
+// Flush submits eligible queued scrobbles to their services: oldest first,
+// batches of 50, at most 700 per service per run, aborting a service's run
+// after its first failed batch (services fail independently). Entries older
+// than 14 days or terminally rejected are dropped; entries for a service
+// without a configured scrobbler are kept untouched.
+func (q *Queue) Flush(ctx context.Context, scrobblers []scrobble.Scrobbler) error {
 	q.mu.Lock()
 	defer q.mu.Unlock()
 	all, err := q.list()
@@ -193,68 +211,78 @@ func (q *Queue) Flush(ctx context.Context, s scrobble.Scrobbler) error {
 		return nil
 	}
 
+	byName := make(map[string]scrobble.Scrobbler, len(scrobblers))
+	for _, s := range scrobblers {
+		byName[s.Name()] = s
+	}
+
 	now := q.now()
-	var keep, eligible []Pending
+	var keep []Pending
+	eligible := make(map[string][]Pending)
 	for _, p := range all {
-		if p.Deferred {
+		switch {
+		case p.Deferred:
 			keep = append(keep, p) // held for commit; never flushed
-			continue
-		}
-		if now.Sub(p.Track.Timestamp) > maxAge {
-			continue // too old for last.fm: drop
-		}
-		if p.CanForceRetry || now.Sub(p.LastFailed) > retryBackoff {
-			eligible = append(eligible, p)
-		} else {
+		case now.Sub(p.Track.Timestamp) > maxAge:
+			// too old to submit: drop
+		case byName[p.Service] == nil:
+			keep = append(keep, p) // service not configured
+		case p.CanForceRetry || now.Sub(p.LastFailed) > retryBackoff:
+			eligible[p.Service] = append(eligible[p.Service], p)
+		default:
 			keep = append(keep, p)
 		}
 	}
 
-	sort.Slice(eligible, func(i, j int) bool {
-		return eligible[i].Track.Timestamp.Before(eligible[j].Track.Timestamp)
-	})
-	if len(eligible) > hardLimit {
-		keep = append(keep, eligible[hardLimit:]...)
-		eligible = eligible[:hardLimit]
-	}
-
-	var flushErr error
-flush:
-	for start := 0; start < len(eligible); start += batchSize {
-		end := min(start+batchSize, len(eligible))
-		batch := eligible[start:end]
-
-		tracks := make([]scrobble.Track, len(batch))
-		for i, p := range batch {
-			tracks[i] = p.Track
+	var errs []error
+	for _, s := range scrobblers {
+		el := eligible[s.Name()]
+		sort.Slice(el, func(i, j int) bool {
+			return el[i].Track.Timestamp.Before(el[j].Track.Timestamp)
+		})
+		if len(el) > hardLimit {
+			keep = append(keep, el[hardLimit:]...)
+			el = el[:hardLimit]
 		}
 
-		err := s.Scrobble(ctx, tracks)
-		switch {
-		case err == nil:
-			// submitted: drop from queue
+	service:
+		for start := 0; start < len(el); start += batchSize {
+			end := min(start+batchSize, len(el))
+			batch := el[start:end]
 
-		case scrobble.Terminal(err):
-			// permanently rejected: drop
-
-		default:
-			// failed: keep this batch and everything after, abort the run
-			for i := range batch {
-				batch[i].LastFailed = now
-				batch[i].Reason = truncate(err.Error(), 100)
-				batch[i].CanForceRetry = false
+			tracks := make([]scrobble.Track, len(batch))
+			for i, p := range batch {
+				tracks[i] = p.Track
 			}
-			keep = append(keep, batch...)
-			keep = append(keep, eligible[end:]...)
-			flushErr = err
-			break flush
+
+			err := s.Scrobble(ctx, tracks)
+			switch {
+			case err == nil:
+				// submitted: drop from queue
+
+			case scrobble.Terminal(err):
+				// permanently rejected: drop
+
+			default:
+				// failed: keep this batch and everything after, abort
+				// this service's run
+				for i := range batch {
+					batch[i].LastFailed = now
+					batch[i].Reason = truncate(err.Error(), 100)
+					batch[i].CanForceRetry = false
+				}
+				keep = append(keep, batch...)
+				keep = append(keep, el[end:]...)
+				errs = append(errs, err)
+				break service
+			}
 		}
 	}
 
 	if err := q.rewrite(keep); err != nil {
 		return err
 	}
-	return flushErr
+	return errors.Join(errs...)
 }
 
 // rewrite replaces the queue file's content in place (truncate + write),

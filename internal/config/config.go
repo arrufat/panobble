@@ -15,6 +15,11 @@ type Lastfm struct {
 	APISecret string `toml:"api_secret"`
 }
 
+type Listenbrainz struct {
+	Token  string `toml:"token"`   // user token; enables the backend when set
+	APIURL string `toml:"api_url"` // empty = api.listenbrainz.org; for self-hosted
+}
+
 type Scrobble struct {
 	DelayPercent    int  `toml:"delay_percent"`
 	DelayMaxSecs    int  `toml:"delay_max_secs"`
@@ -50,11 +55,12 @@ type Rule struct {
 }
 
 type Config struct {
-	Lastfm   Lastfm   `toml:"lastfm"`
-	Scrobble Scrobble `toml:"scrobble"`
-	Players  Players  `toml:"players"`
-	Cleanup  Cleanup  `toml:"cleanup"`
-	Rules    []Rule   `toml:"rule"`
+	Lastfm       Lastfm       `toml:"lastfm"`
+	Listenbrainz Listenbrainz `toml:"listenbrainz"`
+	Scrobble     Scrobble     `toml:"scrobble"`
+	Players      Players      `toml:"players"`
+	Cleanup      Cleanup      `toml:"cleanup"`
+	Rules        []Rule       `toml:"rule"`
 }
 
 func Default() Config {
