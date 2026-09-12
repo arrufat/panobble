@@ -11,8 +11,10 @@ import (
 
 	"github.com/arrufat/panobble/internal/clean"
 	"github.com/arrufat/panobble/internal/config"
+	"github.com/arrufat/panobble/internal/lastfm"
 	"github.com/arrufat/panobble/internal/listenbrainz"
 	"github.com/arrufat/panobble/internal/mpris"
+	"github.com/arrufat/panobble/internal/scrobble"
 	"github.com/arrufat/panobble/internal/tracker"
 )
 
@@ -58,6 +60,21 @@ func cmdDaemon(args []string) error {
 
 	tr := tracker.New(cfg, pipeline, sub, log)
 
+	if cfg.Notifications.Enabled {
+		notif, err := newNotifier(cfg.Notifications, lastfmClient(targets), dataDir, log)
+		if err != nil {
+			log.Warn("desktop notifications unavailable", "err", err)
+		} else {
+			// Deferred before tr.Run so it runs right after the tracker
+			// drains (which posts the final Ended) and before the queue and
+			// watcher shut down.
+			defer notif.close()
+			tr.SetListener(notif)
+			go notif.run()
+			go notif.client.Run()
+		}
+	}
+
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
@@ -86,9 +103,19 @@ func cmdDaemon(args []string) error {
 	}
 
 	log.Info("panobble daemon started", "allowed", cfg.Players.Allowed,
-		"services", sub.serviceNames())
+		"services", sub.serviceNames(), "notifications", cfg.Notifications.Enabled)
 	tr.Run(ctx, watcher.Events())
 	log.Info("panobble daemon stopped")
+	return nil
+}
+
+// lastfmClient returns the configured Last.fm backend, or nil.
+func lastfmClient(targets []scrobble.Scrobbler) *lastfm.Client {
+	for _, b := range targets {
+		if c, ok := b.(*lastfm.Client); ok {
+			return c
+		}
+	}
 	return nil
 }
 

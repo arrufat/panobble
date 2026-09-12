@@ -49,6 +49,7 @@ func authedLastfm(cfg config.Config) (*lastfm.Client, error) {
 		return nil, errors.New("not logged in — run: panobble auth")
 	}
 	client.SessionKey = sess.SessionKey
+	client.Username = sess.Username
 	return client, nil
 }
 

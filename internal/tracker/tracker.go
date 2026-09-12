@@ -34,6 +34,24 @@ type Submitter interface {
 	Scrobble(t scrobble.Track)
 }
 
+// Listener observes plays for UI purposes (the desktop notification). Unlike
+// Submitter it is optional and purely informational: Playing fires once per
+// play when the track has been cleaned and will be scrobbled, regardless of
+// [scrobble].now_playing; Qualified when it passes the threshold; Ended when
+// the play ends (track change, stop, player exit, cancel, shutdown). Calls
+// run on the tracker goroutine and must not block.
+type Listener interface {
+	Playing(t scrobble.Track)
+	Qualified(t scrobble.Track)
+	Ended(t scrobble.Track)
+}
+
+type nopListener struct{}
+
+func (nopListener) Playing(scrobble.Track)   {}
+func (nopListener) Qualified(scrobble.Track) {}
+func (nopListener) Ended(scrobble.Track)     {}
+
 const (
 	timerMeta     = iota // meta debounce: clean + now-playing
 	timerScrobble        // threshold crossed: qualify, hold the commit until track end
@@ -49,6 +67,7 @@ type Tracker struct {
 	cfg       config.Config
 	pipeline  *clean.Pipeline
 	submitter Submitter
+	listener  Listener
 	log       *slog.Logger
 
 	now func() time.Time // injectable for tests
@@ -68,6 +87,7 @@ func New(cfg config.Config, pipeline *clean.Pipeline, submitter Submitter, log *
 		cfg:           cfg,
 		pipeline:      pipeline,
 		submitter:     submitter,
+		listener:      nopListener{},
 		log:           log,
 		now:           time.Now,
 		players:       make(map[string]*player),
@@ -77,6 +97,14 @@ func New(cfg config.Config, pipeline *clean.Pipeline, submitter Submitter, log *
 		unknownDelay:  30 * time.Second,
 		minDelayFloor: 2 * time.Second,
 	}
+}
+
+// SetListener installs a play observer. Call before Run.
+func (tr *Tracker) SetListener(l Listener) {
+	if l == nil {
+		l = nopListener{}
+	}
+	tr.listener = l
 }
 
 // Run consumes events until ctx is cancelled or the channel closes, then
@@ -106,15 +134,34 @@ func (tr *Tracker) drain() {
 	}
 }
 
-// commit submits the held scrobble of a qualified track. No-op otherwise.
+// commit ends the current play: it submits the held scrobble if the track
+// qualified, and tells the listener the play is over either way.
 func (tr *Tracker) commit(p *player) {
-	if p.scrobbled != stateQualified {
+	if p.scrobbled == stateQualified {
+		p.scrobbled = stateScrobbleSubmitted
+		tr.log.Info("scrobbling", "artist", p.cleaned.Artist, "title", p.cleaned.Title,
+			"album", p.cleaned.Album)
+		tr.submitter.Scrobble(p.cleaned)
+	}
+	tr.endPlay(p)
+}
+
+// announce emits Listener.Playing once per play.
+func (tr *Tracker) announce(p *player) {
+	if p.announced {
 		return
 	}
-	p.scrobbled = stateScrobbleSubmitted
-	tr.log.Info("scrobbling", "artist", p.cleaned.Artist, "title", p.cleaned.Title,
-		"album", p.cleaned.Album)
-	tr.submitter.Scrobble(p.cleaned)
+	p.announced = true
+	tr.listener.Playing(p.cleaned)
+}
+
+// endPlay emits Listener.Ended if the play was announced.
+func (tr *Tracker) endPlay(p *player) {
+	if !p.announced {
+		return
+	}
+	p.announced = false
+	tr.listener.Ended(p.cleaned)
 }
 
 func (tr *Tracker) handleMprisEvent(ev mpris.Event) {
@@ -173,6 +220,7 @@ func (tr *Tracker) metadataChanged(p *player, md mpris.Metadata) {
 	if !sameAsOld || (onlyDurationUpdated && md.Duration > 0) {
 		if !sameAsOld {
 			tr.commit(p)
+			p.cleaned = scrobble.Track{} // never announce the previous track's data
 		}
 		p.md = md
 		p.urlHost = md.URLHost
@@ -301,6 +349,7 @@ func (tr *Tracker) pause(p *player) {
 func (tr *Tracker) cancel(p *player) {
 	p.scrobbled = stateCancelled
 	p.stopTimers()
+	tr.endPlay(p)
 }
 
 // arm schedules the track: debounce metaWait, then clean + now-playing, and
@@ -359,6 +408,7 @@ func (tr *Tracker) handleTimerEvent(te timerEvent) {
 			return
 		}
 		p.cleaned = cleaned
+		tr.announce(p)
 
 		if tr.cfg.Scrobble.NowPlaying && tr.shouldSendNowPlaying(p) {
 			p.npSentHash = p.hash
@@ -381,10 +431,12 @@ func (tr *Tracker) handleTimerEvent(te timerEvent) {
 			t = cleaned
 		}
 		p.cleaned = t
+		tr.announce(p)
 		p.scrobbled = stateQualified
 		p.scrobbleTimer = nil // spent
 		tr.log.Info("qualified", "artist", t.Artist, "title", t.Title)
 		tr.submitter.Qualified(t)
+		tr.listener.Qualified(t)
 	}
 }
 

@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strings"
 	"testing"
 	"time"
 
@@ -151,5 +152,110 @@ func TestDurationGate(t *testing.T) {
 	c.NowPlaying(context.Background(), scrobble.Track{Artist: "A", Title: "T", Duration: 10 * time.Second})
 	if form.Get("duration") != "" {
 		t.Errorf("short duration should be omitted, got %q", form.Get("duration"))
+	}
+}
+
+func TestGetTrackInfo(t *testing.T) {
+	for _, body := range []string{
+		`{"track":{"name":"T","url":"https://www.last.fm/music/A%2BB/_/T","artist":{"name":"A+B"},"album":{"title":"L"},"userplaycount":"42","userloved":"1"}}`,
+		`{"track":{"name":"T","url":"https://www.last.fm/music/A%2BB/_/T","artist":{"name":"A+B"},"album":{"title":"L"},"userplaycount":42,"userloved":true}}`,
+	} {
+		var method, rawQuery string
+		var query url.Values
+		c := testClient(t, func(w http.ResponseWriter, r *http.Request) {
+			method = r.Method
+			rawQuery = r.URL.RawQuery
+			query = r.URL.Query()
+			fmt.Fprint(w, body)
+		})
+		c.Username = "me"
+
+		info, err := c.GetTrackInfo(context.Background(), "A+B", "T", c.Username)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if method != http.MethodGet {
+			t.Errorf("method = %s, want GET", method)
+		}
+		for k, want := range map[string]string{
+			"method": "track.getInfo", "api_key": "KEY", "username": "me",
+			"track": "T", "format": "json",
+		} {
+			if got := query.Get(k); got != want {
+				t.Errorf("query[%s] = %q, want %q", k, got, want)
+			}
+		}
+		if query.Get("api_sig") != "" || query.Get("sk") != "" {
+			t.Error("track.getInfo must be unsigned and unauthenticated")
+		}
+		// The '+' quirk: sent as %2B, encoded again on the wire.
+		if !strings.Contains(rawQuery, "artist=A%252BB") {
+			t.Errorf("plus quirk not applied: %s", rawQuery)
+		}
+		want := TrackInfo{Title: "T", Artist: "A+B", Album: "L", URL: "https://www.last.fm/music/A%2BB/_/T", UserPlayCount: 42, UserLoved: true}
+		if info != want {
+			t.Errorf("info = %+v, want %+v", info, want)
+		}
+	}
+}
+
+func TestTrackURL(t *testing.T) {
+	got := TrackURL("Simon & Garfunkel", "Bridge Over Troubled Water")
+	want := "https://www.last.fm/music/Simon%20&%20Garfunkel/_/Bridge%20Over%20Troubled%20Water"
+	if got != want {
+		t.Errorf("TrackURL = %s, want %s", got, want)
+	}
+}
+
+func TestGetTrackInfoNotFound(t *testing.T) {
+	c := testClient(t, func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(400)
+		fmt.Fprint(w, `{"error":6,"message":"Track not found"}`)
+	})
+	_, err := c.GetTrackInfo(context.Background(), "A", "T", "")
+	if !TrackNotFound(err) {
+		t.Errorf("TrackNotFound(%v) = false", err)
+	}
+	if TrackNotFound(nil) {
+		t.Error("TrackNotFound(nil) = true")
+	}
+}
+
+func TestLoveUnlove(t *testing.T) {
+	for _, tc := range []struct {
+		call   func(*Client) error
+		method string
+	}{
+		{func(c *Client) error { return c.Love(context.Background(), "A", "T") }, "track.love"},
+		{func(c *Client) error { return c.Unlove(context.Background(), "A", "T") }, "track.unlove"},
+	} {
+		var form url.Values
+		c := testClient(t, func(w http.ResponseWriter, r *http.Request) {
+			r.ParseForm()
+			form = r.PostForm
+			fmt.Fprint(w, `{"lfm":{"status":"ok"}}`)
+		})
+		if err := tc.call(c); err != nil {
+			t.Fatal(err)
+		}
+		for k, want := range map[string]string{
+			"method": tc.method, "api_key": "KEY", "sk": "SK",
+			"artist": "A", "track": "T", "format": "json",
+		} {
+			if got := form.Get(k); got != want {
+				t.Errorf("%s: form[%s] = %q, want %q", tc.method, k, got, want)
+			}
+		}
+		if form.Get("api_sig") == "" {
+			t.Errorf("%s: api_sig missing", tc.method)
+		}
+	}
+
+	c := testClient(t, func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(403)
+		fmt.Fprint(w, `{"error":9,"message":"Invalid session key"}`)
+	})
+	if err := c.Love(context.Background(), "A", "T"); !scrobble.NeedsReauth(err) {
+		t.Errorf("Love with invalid session: NeedsReauth(%v) = false", err)
 	}
 }

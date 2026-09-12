@@ -32,6 +32,15 @@ require_album = true
 # Hostnames (from the player's xesam:url, www. stripped) never to scrobble.
 blocked_hostnames = []
 
+[notifications]
+# Desktop notification (freedesktop / GNOME) for the track being scrobbled.
+# With Last.fm configured it shows your scrobble count for the track and a
+# Love/Unlove button and a link to the track page. Off by default.
+enabled = false
+# Low urgency: update the notification list without popping up a banner on
+# every track change (GNOME shows low-urgency notifications silently).
+silent = false
+
 [cleanup]
 # parse_title: parse "Artist - Track" from video titles on youtube.com;
 #              skips the scrobble when parsing fails.

@@ -1,5 +1,5 @@
-// Package lastfm is a minimal Last.fm API client covering auth, now-playing
-// and scrobbling.
+// Package lastfm is a minimal Last.fm API client covering auth, now-playing,
+// scrobbling, track info and love/unlove.
 //
 // Protocol details (api_sig, batch format, OOB auth flow, error codes) are
 // ported from pano-scrobbler's Lastfm.kt and LastFmUnauthedRequester.kt.
@@ -27,6 +27,7 @@ type Client struct {
 	APIKey     string
 	APISecret  string
 	SessionKey string // empty until authenticated
+	Username   string // from the stored session; needed for user-scoped lookups
 	HTTP       *http.Client
 	UserAgent  string
 	BaseURL    string
@@ -84,6 +85,30 @@ func (c *Client) post(ctx context.Context, params map[string]string, out any) er
 		return err
 	}
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	return c.do(req, out)
+}
+
+// get sends an unsigned GET request (public methods such as track.getInfo,
+// cf. LastFmUnauthedRequester.kt) and decodes the JSON response into out.
+func (c *Client) get(ctx context.Context, params map[string]string, out any) error {
+	q := url.Values{}
+	for k, v := range params {
+		if v != "" {
+			q.Set(k, v)
+		}
+	}
+	q.Set("format", "json")
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.BaseURL+"?"+q.Encode(), nil)
+	if err != nil {
+		return err
+	}
+	return c.do(req, out)
+}
+
+// do executes req and decodes the response: last.fm API errors first, then
+// HTTP status, then the JSON body into out (nil = discard).
+func (c *Client) do(req *http.Request, out any) error {
 	req.Header.Set("User-Agent", c.UserAgent)
 
 	resp, err := c.HTTP.Do(req)

@@ -442,3 +442,156 @@ func TestScrobbleDelayFormula(t *testing.T) {
 		}
 	}
 }
+
+type fakeListener struct {
+	mu     sync.Mutex
+	events []string // "playing:Title", "qualified:Title", "ended:Title"
+}
+
+func (f *fakeListener) record(kind string, t scrobble.Track) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.events = append(f.events, kind+":"+t.Title)
+}
+
+func (f *fakeListener) Playing(t scrobble.Track)   { f.record("playing", t) }
+func (f *fakeListener) Qualified(t scrobble.Track) { f.record("qualified", t) }
+func (f *fakeListener) Ended(t scrobble.Track)     { f.record("ended", t) }
+
+func (f *fakeListener) snapshot() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]string(nil), f.events...)
+}
+
+func (f *fakeListener) count() int { return len(f.snapshot()) }
+
+// newListenerHarness builds a harness whose tracker has a fakeListener
+// installed before Run starts.
+func newListenerHarness(t *testing.T, mutate func(*config.Config)) (*harness, *fakeListener) {
+	t.Helper()
+	cfg := config.Default()
+	cfg.Players.Allowed = []string{"testplayer"}
+	if mutate != nil {
+		mutate(&cfg)
+	}
+	pipeline, err := clean.NewPipeline(cfg.Cleanup, cfg.Rules)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sub := &fakeSubmitter{}
+	lst := &fakeListener{}
+	tr := New(cfg, pipeline, sub, slog.New(slog.DiscardHandler))
+	tr.SetListener(lst)
+	tr.metaWait = 5 * time.Millisecond
+	tr.unknownDelay = 60 * time.Millisecond
+	tr.minDelayFloor = 30 * time.Millisecond
+
+	events := make(chan mpris.Event, 16)
+	ctx, cancel := context.WithCancel(context.Background())
+	go tr.Run(ctx, events)
+	t.Cleanup(cancel)
+	return &harness{tr: tr, sub: sub, events: events, cancel: cancel}, lst
+}
+
+func assertEvents(t *testing.T, lst *fakeListener, want ...string) {
+	t.Helper()
+	if !waitFor(t, time.Second, func() bool { return lst.count() >= len(want) }) {
+		t.Fatalf("listener events = %v, want %v", lst.snapshot(), want)
+	}
+	time.Sleep(20 * time.Millisecond) // catch stragglers
+	got := lst.snapshot()
+	if len(got) != len(want) {
+		t.Fatalf("listener events = %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("listener events = %v, want %v", got, want)
+		}
+	}
+}
+
+func TestListenerOrdering(t *testing.T) {
+	h, lst := newListenerHarness(t, nil)
+	h.sendMetadata(testTrack)
+	h.sendStatus(mpris.StatusPlaying, 0)
+	waitFor(t, time.Second, func() bool { return h.sub.qualifiedCount() == 1 })
+	h.sendStatus(mpris.StatusStopped, -1)
+	assertEvents(t, lst, "playing:Song", "qualified:Song", "ended:Song")
+	if _, s := h.sub.counts(); s != 1 {
+		t.Fatal("scrobble not committed")
+	}
+}
+
+func TestListenerTrackChangeBeforeThreshold(t *testing.T) {
+	h, lst := newListenerHarness(t, nil)
+	h.sendMetadata(testTrack)
+	h.sendStatus(mpris.StatusPlaying, 0)
+	waitFor(t, time.Second, func() bool { return lst.count() == 1 })
+
+	h.sendMetadata(mpris.Metadata{Artist: "Other", Title: "Next", Album: "Album"})
+	waitFor(t, time.Second, func() bool { return h.sub.qualifiedCount() == 1 })
+	h.sendStatus(mpris.StatusStopped, -1)
+	assertEvents(t, lst, "playing:Song", "ended:Song", "playing:Next", "qualified:Next", "ended:Next")
+	if _, s := h.sub.counts(); s != 1 {
+		t.Fatal("skipped track must not scrobble")
+	}
+}
+
+func TestListenerNoDuplicateOnResume(t *testing.T) {
+	h, lst := newListenerHarness(t, nil)
+	h.sendMetadata(testTrack)
+	h.sendStatus(mpris.StatusPlaying, 0)
+	waitFor(t, time.Second, func() bool { return lst.count() == 1 })
+
+	h.sendStatus(mpris.StatusPaused, 10*time.Second)
+	time.Sleep(10 * time.Millisecond)
+	h.sendStatus(mpris.StatusPlaying, 10*time.Second)
+	waitFor(t, time.Second, func() bool { return h.sub.qualifiedCount() == 1 })
+	h.sendStatus(mpris.StatusStopped, -1)
+	assertEvents(t, lst, "playing:Song", "qualified:Song", "ended:Song")
+}
+
+func TestListenerIgnoredTracksSilent(t *testing.T) {
+	h, lst := newListenerHarness(t, func(c *config.Config) {
+		c.Players.BlockedHostnames = []string{"blocked.example"}
+	})
+	h.sendMetadata(mpris.Metadata{Artist: "Artist", Title: "NoAlbum"})
+	h.sendStatus(mpris.StatusPlaying, 0)
+	h.sendMetadata(mpris.Metadata{Artist: "Artist", Title: "Blocked", Album: "Album", URLHost: "blocked.example"})
+	h.sendStatus(mpris.StatusPlaying, 0)
+	time.Sleep(150 * time.Millisecond)
+	if got := lst.snapshot(); len(got) != 0 {
+		t.Fatalf("ignored tracks must not notify, got %v", got)
+	}
+}
+
+func TestListenerEndedOnPlayerExit(t *testing.T) {
+	h, lst := newListenerHarness(t, nil)
+	h.sendMetadata(testTrack)
+	h.sendStatus(mpris.StatusPlaying, 0)
+	waitFor(t, time.Second, func() bool { return h.sub.qualifiedCount() == 1 })
+	h.events <- mpris.Event{BusName: testBus, AppID: testBus, Removed: true, Position: -1}
+	assertEvents(t, lst, "playing:Song", "qualified:Song", "ended:Song")
+}
+
+func TestListenerEndedOnShutdown(t *testing.T) {
+	h, lst := newListenerHarness(t, nil)
+	h.sendMetadata(testTrack)
+	h.sendStatus(mpris.StatusPlaying, 0)
+	waitFor(t, time.Second, func() bool { return lst.count() == 1 })
+	close(h.events)
+	assertEvents(t, lst, "playing:Song", "ended:Song")
+}
+
+func TestListenerNowPlayingDisabled(t *testing.T) {
+	h, lst := newListenerHarness(t, func(c *config.Config) { c.Scrobble.NowPlaying = false })
+	h.sendMetadata(testTrack)
+	h.sendStatus(mpris.StatusPlaying, 0)
+	waitFor(t, time.Second, func() bool { return h.sub.qualifiedCount() == 1 })
+	h.sendStatus(mpris.StatusStopped, -1)
+	assertEvents(t, lst, "playing:Song", "qualified:Song", "ended:Song")
+	if np, _ := h.sub.counts(); np != 0 {
+		t.Fatal("now-playing must stay disabled")
+	}
+}

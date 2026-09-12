@@ -44,6 +44,19 @@ systemctl --user enable --now panobble
 
 Set `PANOBBLE_DEBUG=1` for debug logs.
 
+## Desktop notification
+
+With `[notifications] enabled = true` the daemon shows a resident desktop
+notification (freedesktop `org.freedesktop.Notifications`, tested on GNOME
+Shell) for the track being scrobbled: artist, title and album, a `✓` once
+the play has qualified, and — when Last.fm is configured — your scrobble
+count for the track, whether you love it, a Love/Unlove button and a
+button that opens the track page in your browser. The
+notification is updated in place on track change and removed when playback
+stops, the player exits, or the daemon shuts down. Pauses leave it as is.
+Set `silent = true` to skip the banner: the notification is only added to
+the notification list (GNOME shows low-urgency notifications that way).
+
 ## How it decides what to scrobble
 
 - Only players in `[players].allowed` (ids normalized: chromium's
@@ -77,4 +90,7 @@ the pano-scrobbler source it was extracted from).
 ## License
 
 GPL-3.0, as it derives logic from pano-scrobbler. Test fixtures in
-`testdata/` originate from web-scrobbler via pano-scrobbler.
+`testdata/` originate from web-scrobbler via pano-scrobbler. The Last.fm
+icon in `cmd/panobble/icons/` is from
+[Font Awesome Free](https://fontawesome.com) (CC BY 4.0); Last.fm is a
+trademark of Last.fm Ltd, used only to indicate the integration.

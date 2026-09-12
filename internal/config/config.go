@@ -36,6 +36,16 @@ type Players struct {
 	BlockedHostnames []string `toml:"blocked_hostnames"`
 }
 
+type Notifications struct {
+	// Enabled shows a desktop notification (org.freedesktop.Notifications)
+	// for the track being scrobbled, with the Last.fm scrobble count and a
+	// Love/Unlove button when Last.fm is configured.
+	Enabled bool `toml:"enabled"`
+	// Silent sends notifications with low urgency: they appear in the
+	// notification list without popping up a banner on every track change.
+	Silent bool `toml:"silent"`
+}
+
 type Cleanup struct {
 	Presets        []string `toml:"presets"`
 	ParseTitleApps []string `toml:"parse_title_apps"`
@@ -55,12 +65,13 @@ type Rule struct {
 }
 
 type Config struct {
-	Lastfm       Lastfm       `toml:"lastfm"`
-	Listenbrainz Listenbrainz `toml:"listenbrainz"`
-	Scrobble     Scrobble     `toml:"scrobble"`
-	Players      Players      `toml:"players"`
-	Cleanup      Cleanup      `toml:"cleanup"`
-	Rules        []Rule       `toml:"rule"`
+	Lastfm        Lastfm        `toml:"lastfm"`
+	Listenbrainz  Listenbrainz  `toml:"listenbrainz"`
+	Scrobble      Scrobble      `toml:"scrobble"`
+	Players       Players       `toml:"players"`
+	Notifications Notifications `toml:"notifications"`
+	Cleanup       Cleanup       `toml:"cleanup"`
+	Rules         []Rule        `toml:"rule"`
 }
 
 func Default() Config {
