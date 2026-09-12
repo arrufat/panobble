@@ -33,7 +33,7 @@ type player struct {
 
 	lastScrobbleHash uint64
 	scrobbled        scrobbledState
-	announced        bool // Listener.Playing emitted for the current play
+	announced        scrobble.Track // as told to the Listener; zero = not announced
 	isPlaying        bool
 	lastPlayback     mpris.PlaybackStatus
 	lastDuration     time.Duration

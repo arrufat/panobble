@@ -1,11 +1,6 @@
-// Package notify is a minimal org.freedesktop.Notifications client: Notify,
-// CloseNotification and the ActionInvoked / NotificationClosed signals, on a
-// private session-bus connection.
-//
-// This package has no pano-scrobbler counterpart: upstream renders its
-// now-playing state in a JVM tray menu on desktop and in Android
-// notifications. The behaviour here follows the freedesktop Desktop
-// Notifications Specification instead.
+// Package notify is a minimal org.freedesktop.Notifications client on a
+// private session-bus connection. It has no pano-scrobbler counterpart
+// (upstream uses a tray menu on desktop).
 package notify
 
 import (
@@ -53,28 +48,21 @@ type Client struct {
 }
 
 // Connect opens a private session-bus connection and subscribes to the
-// server's signals. Signals are addressed to the connection that sent the
-// notification, which is why this connection is not shared.
+// server's signals, which are addressed to the connection that called Notify.
 func Connect() (*Client, error) {
 	conn, err := dbus.ConnectSessionBus()
 	if err != nil {
 		return nil, fmt.Errorf("connecting to session bus: %w", err)
 	}
-	// Servers that address their signals to the client (GNOME) reach us
-	// without any rule; the rules cover servers that broadcast. Restricting
-	// the sender to the name owner matters on GNOME 51, where gnome-shell
-	// broadcasts a second copy of every signal the (separate) notification
-	// server already sent us directly.
-	for _, member := range []string{"ActionInvoked", "NotificationClosed"} {
-		if err := conn.AddMatchSignal(
-			dbus.WithMatchSender(busName),
-			dbus.WithMatchObjectPath(objPath),
-			dbus.WithMatchInterface(iface),
-			dbus.WithMatchMember(member),
-		); err != nil {
-			conn.Close()
-			return nil, err
-		}
+	// The rule covers servers that broadcast. The sender filter drops the
+	// duplicate copy gnome-shell broadcasts next to the server's own signal.
+	if err := conn.AddMatchSignal(
+		dbus.WithMatchSender(busName),
+		dbus.WithMatchObjectPath(objPath),
+		dbus.WithMatchInterface(iface),
+	); err != nil {
+		conn.Close()
+		return nil, err
 	}
 	c := &Client{
 		conn: conn,
@@ -131,13 +119,6 @@ func (c *Client) Notify(ctx context.Context, n Notification) (uint32, error) {
 // CloseNotification removes a notification.
 func (c *Client) CloseNotification(ctx context.Context, id uint32) error {
 	return c.obj.CallWithContext(ctx, iface+".CloseNotification", 0, id).Err
-}
-
-// Capabilities returns the server's advertised capabilities.
-func (c *Client) Capabilities(ctx context.Context) ([]string, error) {
-	var caps []string
-	err := c.obj.CallWithContext(ctx, iface+".GetCapabilities", 0).Store(&caps)
-	return caps, err
 }
 
 // Close closes the connection; Run returns afterwards.

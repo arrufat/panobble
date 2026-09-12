@@ -68,16 +68,22 @@ func (c *Client) sign(params map[string]string) string {
 	return fmt.Sprintf("%032x", md5.Sum([]byte(b.String())))
 }
 
-// post sends a signed POST form request and decodes the JSON response into out.
-func (c *Client) post(ctx context.Context, params map[string]string, out any) error {
-	form := url.Values{}
-	for k, v := range params {
-		if v != "" {
-			form.Set(k, v)
+// values builds the request parameters: empty values dropped, format=json.
+func values(params map[string]string) url.Values {
+	v := url.Values{}
+	for k, val := range params {
+		if val != "" {
+			v.Set(k, val)
 		}
 	}
+	v.Set("format", "json")
+	return v
+}
+
+// post sends a signed POST form request and decodes the JSON response into out.
+func (c *Client) post(ctx context.Context, params map[string]string, out any) error {
+	form := values(params)
 	form.Set("api_sig", c.sign(params))
-	form.Set("format", "json")
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.BaseURL,
 		strings.NewReader(form.Encode()))
@@ -88,16 +94,14 @@ func (c *Client) post(ctx context.Context, params map[string]string, out any) er
 	return c.do(req, out)
 }
 
-// get sends an unsigned GET request (public methods such as track.getInfo,
-// cf. LastFmUnauthedRequester.kt) and decodes the JSON response into out.
+// get sends an unsigned GET request and decodes the JSON response into out.
+// '+' is double-encoded, as in LastFmUnauthedRequester.doubleEncodePlusParam.
 func (c *Client) get(ctx context.Context, params map[string]string, out any) error {
-	q := url.Values{}
+	quirked := make(map[string]string, len(params))
 	for k, v := range params {
-		if v != "" {
-			q.Set(k, v)
-		}
+		quirked[k] = strings.ReplaceAll(v, "+", "%2B")
 	}
-	q.Set("format", "json")
+	q := values(quirked)
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.BaseURL+"?"+q.Encode(), nil)
 	if err != nil {

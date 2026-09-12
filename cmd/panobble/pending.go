@@ -45,7 +45,7 @@ func cmdPending(args []string) error {
 	if err != nil {
 		return err
 	}
-	targets, err := backends(cfg)
+	targets, _, err := backends(cfg)
 	if err != nil {
 		return err
 	}

@@ -4,6 +4,9 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"os"
+	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -20,11 +23,15 @@ type fakeServer struct {
 	notifs  []notify.Notification
 	closed  []uint32
 	returns []uint32 // ids handed out, parallel to notifs
+	fail    bool
 }
 
 func (f *fakeServer) Notify(_ context.Context, n notify.Notification) (uint32, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.fail {
+		return 0, errors.New("server down")
+	}
 	id := n.ReplacesID
 	if id == 0 {
 		f.nextID++
@@ -33,6 +40,12 @@ func (f *fakeServer) Notify(_ context.Context, n notify.Notification) (uint32, e
 	f.notifs = append(f.notifs, n)
 	f.returns = append(f.returns, id)
 	return id, nil
+}
+
+func (f *fakeServer) setFail(fail bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.fail = fail
 }
 
 func (f *fakeServer) CloseNotification(_ context.Context, id uint32) error {
@@ -76,7 +89,7 @@ func newFakeLastfm() *fakeLastfm {
 	return &fakeLastfm{infoGate: make(chan struct{}, 8), loveGate: make(chan struct{}, 8)}
 }
 
-func (f *fakeLastfm) GetTrackInfo(ctx context.Context, artist, title, username string) (lastfm.TrackInfo, error) {
+func (f *fakeLastfm) GetTrackInfo(ctx context.Context, artist, title string) (lastfm.TrackInfo, error) {
 	select {
 	case <-f.infoGate:
 	case <-ctx.Done():
@@ -127,10 +140,22 @@ func newTestNotifier(t *testing.T, lfm *fakeLastfm) (*notifier, *fakeServer) {
 		api = lfm
 	}
 	n := newNotifierWith(srv, api, slog.New(slog.DiscardHandler))
-	n.username = "me"
-	go n.run()
+	n.start()
 	t.Cleanup(n.close)
 	return n, srv
+}
+
+// showTrack starts a play, releases its info fetch and waits for the
+// notification; it returns the notification id.
+func showTrack(t *testing.T, n *notifier, lfm *fakeLastfm, srv *fakeServer, track scrobble.Track) uint32 {
+	t.Helper()
+	before := srv.count()
+	n.Playing(track)
+	if lfm != nil {
+		lfm.infoGate <- struct{}{}
+	}
+	waitFor(t, func() bool { return srv.count() == before+1 })
+	return srv.returns[before]
 }
 
 var (
@@ -171,10 +196,8 @@ func TestNotifierOpenAction(t *testing.T) {
 	var mu sync.Mutex
 	n.open = func(url string) error { mu.Lock(); opened = append(opened, url); mu.Unlock(); return nil }
 
-	n.Playing(trackA)
-	lfm.infoGate <- struct{}{}
-	waitFor(t, func() bool { return srv.count() == 1 })
-	n.post(func() { n.onAction(srv.returns[0], "open") })
+	id := showTrack(t, n, lfm, srv, trackA)
+	n.post(func() { n.onAction(id, "open") })
 	waitFor(t, func() bool { mu.Lock(); defer mu.Unlock(); return len(opened) == 1 })
 	if opened[0] != "https://www.last.fm/music/A/_/Alpha" {
 		t.Errorf("opened %q", opened[0])
@@ -183,10 +206,8 @@ func TestNotifierOpenAction(t *testing.T) {
 	// Without info (lookup failed) the URL is constructed.
 	lfm.infoErr = errors.New("down")
 	n.Ended(trackA)
-	n.Playing(trackB)
-	lfm.infoGate <- struct{}{}
-	waitFor(t, func() bool { return srv.count() == 2 })
-	n.post(func() { n.onAction(srv.returns[1], "open") })
+	id = showTrack(t, n, lfm, srv, trackB)
+	n.post(func() { n.onAction(id, "open") })
 	waitFor(t, func() bool { mu.Lock(); defer mu.Unlock(); return len(opened) == 2 })
 	if opened[1] != "https://www.last.fm/music/B/_/Beta" {
 		t.Errorf("fallback opened %q", opened[1])
@@ -195,8 +216,7 @@ func TestNotifierOpenAction(t *testing.T) {
 
 func TestNotifierWithoutLastfm(t *testing.T) {
 	n, srv := newTestNotifier(t, nil)
-	n.Playing(trackA)
-	waitFor(t, func() bool { return srv.count() == 1 })
+	showTrack(t, n, nil, srv, trackA)
 	got := srv.last()
 	if len(got.Actions) != 0 || strings.Contains(got.Body, "scrobble") {
 		t.Errorf("ListenBrainz-only notification must have no love/count: %+v", got)
@@ -227,11 +247,7 @@ func TestNotifierStaleInfoDiscarded(t *testing.T) {
 func TestNotifierQualifiedAndLove(t *testing.T) {
 	lfm := newFakeLastfm()
 	n, srv := newTestNotifier(t, lfm)
-
-	n.Playing(trackA)
-	lfm.infoGate <- struct{}{}
-	waitFor(t, func() bool { return srv.count() == 1 })
-	id := srv.returns[0]
+	id := showTrack(t, n, lfm, srv, trackA)
 
 	n.Qualified(trackA)
 	waitFor(t, func() bool { return srv.count() == 2 })
@@ -239,7 +255,6 @@ func TestNotifierQualifiedAndLove(t *testing.T) {
 		t.Errorf("qualified render: %+v", got)
 	}
 
-	n.client = nil
 	n.post(func() { n.onAction(id, "love") })
 	lfm.loveGate <- struct{}{}
 	waitFor(t, func() bool { return srv.count() == 3 })
@@ -247,7 +262,7 @@ func TestNotifierQualifiedAndLove(t *testing.T) {
 	if got.Actions[0] != "unlove" || !strings.Contains(got.Body, "♥ Loved") {
 		t.Errorf("love render: %+v", got)
 	}
-	if len(lfm.loves) != 1 || lfm.loves[0] != "love:Alpha" {
+	if !slices.Equal(lfm.loves, []string{"love:Alpha"}) {
 		t.Errorf("loves = %v", lfm.loves)
 	}
 }
@@ -255,17 +270,11 @@ func TestNotifierQualifiedAndLove(t *testing.T) {
 func TestNotifierLoveRace(t *testing.T) {
 	lfm := newFakeLastfm()
 	n, srv := newTestNotifier(t, lfm)
-
-	n.Playing(trackA)
-	lfm.infoGate <- struct{}{}
-	waitFor(t, func() bool { return srv.count() == 1 })
-	id := srv.returns[0]
+	id := showTrack(t, n, lfm, srv, trackA)
 
 	n.post(func() { n.onAction(id, "love") })
 	n.Ended(trackA)
-	n.Playing(trackB)
-	lfm.infoGate <- struct{}{}
-	waitFor(t, func() bool { return srv.count() == 2 })
+	showTrack(t, n, lfm, srv, trackB)
 
 	lfm.loveGate <- struct{}{} // A's love completes after B is shown
 	settle()
@@ -281,11 +290,9 @@ func TestNotifierLoveFailureKeepsState(t *testing.T) {
 	lfm := newFakeLastfm()
 	lfm.loveErr = errors.New("boom")
 	n, srv := newTestNotifier(t, lfm)
+	id := showTrack(t, n, lfm, srv, trackA)
 
-	n.Playing(trackA)
-	lfm.infoGate <- struct{}{}
-	waitFor(t, func() bool { return srv.count() == 1 })
-	n.post(func() { n.onAction(srv.returns[0], "love") })
+	n.post(func() { n.onAction(id, "love") })
 	lfm.loveGate <- struct{}{}
 	settle()
 	if srv.count() != 1 {
@@ -296,11 +303,7 @@ func TestNotifierLoveFailureKeepsState(t *testing.T) {
 func TestNotifierDismissed(t *testing.T) {
 	lfm := newFakeLastfm()
 	n, srv := newTestNotifier(t, lfm)
-
-	n.Playing(trackA)
-	lfm.infoGate <- struct{}{}
-	waitFor(t, func() bool { return srv.count() == 1 })
-	id := srv.returns[0]
+	id := showTrack(t, n, lfm, srv, trackA)
 
 	n.post(func() { n.onClosed(id, notify.ReasonDismissed) })
 	n.Qualified(trackA)
@@ -315,22 +318,34 @@ func TestNotifierDismissed(t *testing.T) {
 		t.Error("must not close a notification the user already dismissed")
 	}
 
-	n.Playing(trackB)
-	lfm.infoGate <- struct{}{}
-	waitFor(t, func() bool { return srv.count() == 2 })
+	showTrack(t, n, lfm, srv, trackB)
 	if got := srv.last(); got.ReplacesID != 0 {
 		t.Errorf("next play must start a fresh notification, got replaces %d", got.ReplacesID)
 	}
 }
 
+func TestNotifierDismissedDuringFetch(t *testing.T) {
+	lfm := newFakeLastfm()
+	n, srv := newTestNotifier(t, lfm)
+	id := showTrack(t, n, lfm, srv, trackA)
+
+	// Track change: B's fetch is pending while A's notification is still up.
+	n.Playing(trackB)
+	n.post(func() { n.onClosed(id, notify.ReasonDismissed) })
+	lfm.infoGate <- struct{}{}
+	settle()
+	if srv.count() != 1 {
+		t.Errorf("info arriving after a dismissal must not re-post: %+v", srv.notifs)
+	}
+}
+
 func TestNotifierEndedCloses(t *testing.T) {
 	n, srv := newTestNotifier(t, nil)
-	n.Playing(trackA)
-	waitFor(t, func() bool { return srv.count() == 1 })
+	id := showTrack(t, n, nil, srv, trackA)
 	n.Ended(trackA)
 	waitFor(t, func() bool { return len(srv.closedIDs()) == 1 })
-	if srv.closedIDs()[0] != srv.returns[0] {
-		t.Errorf("closed %v, shown %v", srv.closedIDs(), srv.returns)
+	if srv.closedIDs()[0] != id {
+		t.Errorf("closed %v, shown %v", srv.closedIDs(), id)
 	}
 	n.Qualified(trackA) // late event for an ended play
 	settle()
@@ -341,25 +356,57 @@ func TestNotifierEndedCloses(t *testing.T) {
 
 func TestNotifierTrackChangeReplacesInPlace(t *testing.T) {
 	n, srv := newTestNotifier(t, nil)
-	n.Playing(trackA)
-	waitFor(t, func() bool { return srv.count() == 1 })
+	id := showTrack(t, n, nil, srv, trackA)
 	// Track change without an explicit Ended (e.g. a second player).
-	n.Playing(trackB)
-	waitFor(t, func() bool { return srv.count() == 2 })
-	if got := srv.last(); got.ReplacesID != srv.returns[0] {
+	showTrack(t, n, nil, srv, trackB)
+	if got := srv.last(); got.ReplacesID != id {
 		t.Errorf("expected in-place update, got %+v", got)
 	}
 }
 
-func TestNotifierCloseRemovesNotification(t *testing.T) {
-	srv := &fakeServer{}
-	n := newNotifierWith(srv, nil, slog.New(slog.DiscardHandler))
-	go n.run()
+func TestNotifierNotifyFailureDropsPlay(t *testing.T) {
+	n, srv := newTestNotifier(t, nil)
+	srv.setFail(true)
 	n.Playing(trackA)
-	waitFor(t, func() bool { return srv.count() == 1 })
+	n.Qualified(trackA)
+	settle()
+	srv.setFail(false)
+	showTrack(t, n, nil, srv, trackB)
+	if got := srv.last(); got.ReplacesID != 0 || got.Summary != "B — Beta" {
+		t.Errorf("a failed play must be forgotten, got %+v", got)
+	}
+}
+
+func TestNotifierCloseRemovesNotification(t *testing.T) {
+	n, srv := newTestNotifier(t, nil)
+	id := showTrack(t, n, nil, srv, trackA)
 	n.close()
-	if ids := srv.closedIDs(); len(ids) != 1 {
+	if ids := srv.closedIDs(); !slices.Equal(ids, []uint32{id}) {
 		t.Errorf("close must remove the notification, closed %v", ids)
+	}
+}
+
+func TestInstallIcon(t *testing.T) {
+	dir := t.TempDir()
+	outdated := filepath.Join(dir, "lastfm-00000000-symbolic.svg")
+	os.WriteFile(outdated, []byte("x"), 0o644)
+
+	path, err := installIcon(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if filepath.Dir(path) != dir || !strings.HasPrefix(filepath.Base(path), "lastfm-") ||
+		!strings.HasSuffix(path, "-symbolic.svg") {
+		t.Errorf("unexpected icon path %q", path)
+	}
+	if got, _ := os.ReadFile(path); string(got) != string(lastfmIcon) {
+		t.Error("icon content not written")
+	}
+	if _, err := os.Stat(outdated); !os.IsNotExist(err) {
+		t.Error("outdated icon not removed")
+	}
+	if again, _ := installIcon(dir); again != path {
+		t.Errorf("second install returned %q, want %q", again, path)
 	}
 }
 
@@ -374,12 +421,10 @@ func TestBuildNotification(t *testing.T) {
 		actions []string
 	}{
 		{"plain", shown{track: base}, false, "Simon & Garfunkel — <Sound>", "<i>A &amp; B</i>", nil},
-		{"qualified, loved, plural", shown{track: base, qualified: true, hasInfo: true, count: 2, loved: true}, true,
+		{"qualified, loved, plural", shown{track: base, qualified: true, count: 2, loved: true}, true,
 			"✓ Simon & Garfunkel — <Sound>", "<i>A &amp; B</i> · 2 scrobbles · ♥ Loved", []string{"unlove", "♥ Unlove", "open", "Track page"}},
-		{"singular", shown{track: base, hasInfo: true, count: 1}, true,
+		{"singular", shown{track: base, count: 1}, true,
 			"Simon & Garfunkel — <Sound>", "<i>A &amp; B</i> · 1 scrobble", []string{"love", "♡ Love", "open", "Track page"}},
-		{"zero count omitted", shown{track: base, hasInfo: true}, true,
-			"Simon & Garfunkel — <Sound>", "<i>A &amp; B</i>", []string{"love", "♡ Love", "open", "Track page"}},
 		{"no info", shown{track: scrobble.Track{Artist: "A", Title: "T"}}, true,
 			"A — T", "", []string{"love", "♡ Love", "open", "Track page"}},
 	} {
@@ -390,7 +435,7 @@ func TestBuildNotification(t *testing.T) {
 		if got.Body != tc.body {
 			t.Errorf("%s: body = %q, want %q", tc.name, got.Body, tc.body)
 		}
-		if strings.Join(got.Actions, ",") != strings.Join(tc.actions, ",") {
+		if !slices.Equal(got.Actions, tc.actions) {
 			t.Errorf("%s: actions = %v, want %v", tc.name, got.Actions, tc.actions)
 		}
 		if got.Hints["resident"].Value() != true || got.Timeout != -1 {

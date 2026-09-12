@@ -21,10 +21,9 @@ type TrackInfo struct {
 	UserLoved     bool   // loved by the requesting user
 }
 
-// GetTrackInfo fetches track.getInfo. username may be empty, in which case
-// the user-scoped fields stay zero. Ported from
-// LastFmUnauthedRequester.getTrackInfo.
-func (c *Client) GetTrackInfo(ctx context.Context, artist, title, username string) (TrackInfo, error) {
+// GetTrackInfo fetches track.getInfo for c.Username (may be empty).
+// Ported from LastFmUnauthedRequester.getTrackInfo.
+func (c *Client) GetTrackInfo(ctx context.Context, artist, title string) (TrackInfo, error) {
 	var resp struct {
 		Track struct {
 			Name   string `json:"name"`
@@ -42,9 +41,9 @@ func (c *Client) GetTrackInfo(ctx context.Context, artist, title, username strin
 	err := c.get(ctx, map[string]string{
 		"method":   "track.getInfo",
 		"api_key":  c.APIKey,
-		"artist":   plusQuirk(artist),
-		"track":    plusQuirk(title),
-		"username": username,
+		"artist":   artist,
+		"track":    title,
+		"username": c.Username,
 	}, &resp)
 	if err != nil {
 		return TrackInfo{}, err
@@ -59,8 +58,7 @@ func (c *Client) GetTrackInfo(ctx context.Context, artist, title, username strin
 	}, nil
 }
 
-// TrackURL builds the track's last.fm page URL, the fallback when
-// track.getInfo did not answer.
+// TrackURL builds the track's last.fm page URL.
 func TrackURL(artist, title string) string {
 	return "https://www.last.fm/music/" + url.PathEscape(artist) + "/_/" + url.PathEscape(title)
 }
@@ -92,15 +90,7 @@ func (c *Client) setLoved(ctx context.Context, method, artist, title string) err
 	}, nil)
 }
 
-// plusQuirk works around a last.fm bug on unauthenticated GETs: a literal
-// '+' must be sent double-encoded (LastFmUnauthedRequester.doubleEncodePlusParam).
-func plusQuirk(s string) string {
-	return strings.ReplaceAll(s, "+", "%2B")
-}
-
-// flexInt decodes a JSON number or a numeric string (last.fm sends
-// userplaycount as "42"); anything unparsable reads as 0. Mirrors upstream's
-// StringOrIntSerializer.
+// flexInt decodes a JSON number or numeric string (StringOrIntSerializer).
 type flexInt int
 
 func (f *flexInt) UnmarshalJSON(b []byte) error {
@@ -113,8 +103,7 @@ func (f *flexInt) UnmarshalJSON(b []byte) error {
 	return nil
 }
 
-// flexBool decodes true/false, 1/0 and their string forms (last.fm sends
-// userloved as "1"/"0"). Mirrors upstream's StringOrBoolSerializer.
+// flexBool decodes a JSON bool, 1/0 or their strings (StringOrBoolSerializer).
 type flexBool bool
 
 func (f *flexBool) UnmarshalJSON(b []byte) error {

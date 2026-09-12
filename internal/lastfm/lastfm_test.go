@@ -170,7 +170,7 @@ func TestGetTrackInfo(t *testing.T) {
 		})
 		c.Username = "me"
 
-		info, err := c.GetTrackInfo(context.Background(), "A+B", "T", c.Username)
+		info, err := c.GetTrackInfo(context.Background(), "A+B", "T")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -212,7 +212,7 @@ func TestGetTrackInfoNotFound(t *testing.T) {
 		w.WriteHeader(400)
 		fmt.Fprint(w, `{"error":6,"message":"Track not found"}`)
 	})
-	_, err := c.GetTrackInfo(context.Background(), "A", "T", "")
+	_, err := c.GetTrackInfo(context.Background(), "A", "T")
 	if !TrackNotFound(err) {
 		t.Errorf("TrackNotFound(%v) = false", err)
 	}

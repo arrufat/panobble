@@ -34,12 +34,10 @@ type Submitter interface {
 	Scrobble(t scrobble.Track)
 }
 
-// Listener observes plays for UI purposes (the desktop notification). Unlike
-// Submitter it is optional and purely informational: Playing fires once per
-// play when the track has been cleaned and will be scrobbled, regardless of
-// [scrobble].now_playing; Qualified when it passes the threshold; Ended when
-// the play ends (track change, stop, player exit, cancel, shutdown). Calls
-// run on the tracker goroutine and must not block.
+// Listener observes plays (for the desktop notification). Playing fires once
+// per play once the track is cleaned, regardless of now_playing; Qualified
+// at the threshold; Ended when the play ends. Calls run on the tracker
+// goroutine and must not block.
 type Listener interface {
 	Playing(t scrobble.Track)
 	Qualified(t scrobble.Track)
@@ -134,8 +132,7 @@ func (tr *Tracker) drain() {
 	}
 }
 
-// commit ends the current play: it submits the held scrobble if the track
-// qualified, and tells the listener the play is over either way.
+// commit ends the play: scrobbles it if qualified, and notifies the listener.
 func (tr *Tracker) commit(p *player) {
 	if p.scrobbled == stateQualified {
 		p.scrobbled = stateScrobbleSubmitted
@@ -146,22 +143,24 @@ func (tr *Tracker) commit(p *player) {
 	tr.endPlay(p)
 }
 
-// announce emits Listener.Playing once per play.
+// announce emits Listener.Playing once per play, keeping the track so
+// Qualified and Ended carry the identical value.
 func (tr *Tracker) announce(p *player) {
-	if p.announced {
+	if p.announced != (scrobble.Track{}) {
 		return
 	}
-	p.announced = true
-	tr.listener.Playing(p.cleaned)
+	p.announced = p.cleaned
+	tr.listener.Playing(p.announced)
 }
 
 // endPlay emits Listener.Ended if the play was announced.
 func (tr *Tracker) endPlay(p *player) {
-	if !p.announced {
+	if p.announced == (scrobble.Track{}) {
 		return
 	}
-	p.announced = false
-	tr.listener.Ended(p.cleaned)
+	t := p.announced
+	p.announced = scrobble.Track{}
+	tr.listener.Ended(t)
 }
 
 func (tr *Tracker) handleMprisEvent(ev mpris.Event) {
@@ -197,6 +196,7 @@ func (tr *Tracker) handleMprisEvent(ev mpris.Event) {
 		if *ev.SeekedTo < tr.startPosLimit && p.isPlaying &&
 			p.scrobbled >= stateQualified && p.scrobbled != stateCancelled {
 			tr.commit(p)
+			p.cleaned = scrobble.Track{}
 			p.resetPlayClock(tr.now())
 			p.scrobbled = stateNone
 			tr.arm(p)
@@ -436,7 +436,7 @@ func (tr *Tracker) handleTimerEvent(te timerEvent) {
 		p.scrobbleTimer = nil // spent
 		tr.log.Info("qualified", "artist", t.Artist, "title", t.Title)
 		tr.submitter.Qualified(t)
-		tr.listener.Qualified(t)
+		tr.listener.Qualified(p.announced)
 	}
 }
 

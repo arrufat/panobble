@@ -54,14 +54,18 @@ func authedLastfm(cfg config.Config) (*lastfm.Client, error) {
 }
 
 // backends assembles the configured scrobble targets: Last.fm when api_key
-// is set (needs a stored session), ListenBrainz when a token is set.
-func backends(cfg config.Config) ([]scrobble.Scrobbler, error) {
+// is set (needs a stored session), ListenBrainz when a token is set. The
+// Last.fm client is also returned on its own (nil if not configured) for
+// features beyond scrobbling.
+func backends(cfg config.Config) ([]scrobble.Scrobbler, *lastfm.Client, error) {
 	var out []scrobble.Scrobbler
+	var lfm *lastfm.Client
 	if cfg.Lastfm.APIKey != "" || cfg.Lastfm.APISecret != "" {
 		client, err := authedLastfm(cfg)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
+		lfm = client
 		out = append(out, client)
 	}
 	if cfg.Listenbrainz.Token != "" {
@@ -72,10 +76,15 @@ func backends(cfg config.Config) ([]scrobble.Scrobbler, error) {
 	}
 	if len(out) == 0 {
 		path, _ := config.Path()
-		return nil, fmt.Errorf(
+		return nil, nil, fmt.Errorf(
 			"no scrobble targets configured — set [lastfm] api_key/api_secret and/or [listenbrainz] token in %s", path)
 	}
-	return out, nil
+	return out, lfm, nil
+}
+
+// openBrowser opens url in the user's browser without waiting.
+func openBrowser(url string) error {
+	return exec.Command("xdg-open", url).Start()
 }
 
 func cmdAuth(args []string) error {
@@ -94,7 +103,7 @@ func cmdAuth(args []string) error {
 	fmt.Println("Opening browser to authorize panobble with your Last.fm account…")
 	fmt.Println("If it does not open, visit:")
 	fmt.Println("  " + authURL)
-	exec.Command("xdg-open", authURL).Start()
+	openBrowser(authURL)
 
 	fmt.Println("Waiting for authorization (up to 2 minutes)…")
 	sess, err := client.PollSession(ctx, token)
