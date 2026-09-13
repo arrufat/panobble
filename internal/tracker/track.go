@@ -121,3 +121,10 @@ func scrobbleDelay(duration, timePlayed time.Duration, delayPercent int,
 	}
 	return delay
 }
+
+func absDuration(d time.Duration) time.Duration {
+	if d < 0 {
+		return -d
+	}
+	return d
+}

@@ -565,3 +565,61 @@ func TestListenerNowPlayingDisabled(t *testing.T) {
 		t.Fatal("now-playing must stay disabled")
 	}
 }
+
+// fastDelay makes any known duration scrobble at the minimum delay floor.
+func fastDelay(c *config.Config) {
+	c.Scrobble.DelayPercent = 0
+	c.Scrobble.DelayMaxSecs = 0
+	c.Scrobble.MinDurationSecs = 0
+}
+
+// Elisa re-publishes the same track with the duration drifting by tens of
+// milliseconds; that must not restart the play clock.
+func TestDurationJitterDoesNotRestartPlay(t *testing.T) {
+	h := newHarness(t, fastDelay)
+	md := testTrack
+	md.Duration = 182877 * time.Millisecond
+	start := time.Now()
+	h.sendMetadata(md)
+	h.sendStatus(mpris.StatusPlaying, 0)
+
+	deadline := start.Add(200 * time.Millisecond)
+	for time.Now().Before(deadline) {
+		md.Duration += 26 * time.Millisecond
+		h.sendMetadata(md)
+		time.Sleep(5 * time.Millisecond)
+	}
+
+	if !waitFor(t, time.Second, func() bool { return h.sub.qualifiedCount() == 1 }) {
+		t.Fatal("track never qualified under duration jitter")
+	}
+	h.sendStatus(mpris.StatusStopped, -1)
+	if !waitFor(t, time.Second, func() bool { _, s := h.sub.counts(); return s == 1 }) {
+		t.Fatal("scrobble not committed")
+	}
+	if drift := h.sub.lastScrobble().Timestamp.Sub(start); drift > 100*time.Millisecond {
+		t.Errorf("play clock restarted: timestamp drifted %v", drift)
+	}
+}
+
+// A real duration change (unknown -> known) must still re-arm.
+func TestRealDurationUpdateStillRearms(t *testing.T) {
+	h := newHarness(t, fastDelay)
+	h.sendMetadata(testTrack) // duration unknown
+	h.sendStatus(mpris.StatusPlaying, 0)
+
+	md := testTrack
+	md.Duration = 4 * time.Minute
+	h.sendMetadata(md)
+
+	if !waitFor(t, time.Second, func() bool { return h.sub.qualifiedCount() == 1 }) {
+		t.Fatal("track never qualified after duration arrived")
+	}
+	h.sendStatus(mpris.StatusStopped, -1)
+	if !waitFor(t, time.Second, func() bool { _, s := h.sub.counts(); return s == 1 }) {
+		t.Fatal("scrobble not committed")
+	}
+	if got := h.sub.lastScrobble(); got.Duration != 4*time.Minute {
+		t.Errorf("scrobbled duration = %v, want 4m", got.Duration)
+	}
+}

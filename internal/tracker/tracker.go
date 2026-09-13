@@ -20,8 +20,9 @@ import (
 )
 
 const (
-	metaWait      = 1 * time.Second         // debounce before cleanup + now-playing
-	startPosLimit = 1500 * time.Millisecond // "position is at track start" threshold
+	metaWait          = 1 * time.Second         // debounce before cleanup + now-playing
+	startPosLimit     = 1500 * time.Millisecond // "position is at track start" threshold
+	durationTolerance = 1 * time.Second         // slack before a duration change counts as an update
 )
 
 // Submitter receives the tracker's output. Implementations do network I/O on
@@ -207,7 +208,9 @@ func (tr *Tracker) handleMprisEvent(ev mpris.Event) {
 func (tr *Tracker) metadataChanged(p *player, md mpris.Metadata) {
 	sameAsOld := md.Artist == p.md.Artist && md.Title == p.md.Title &&
 		md.Album == p.md.Album && md.AlbumArtist == p.md.AlbumArtist
-	onlyDurationUpdated := sameAsOld && md.Duration != p.md.Duration
+	// Tolerance: some players re-publish a track with the duration drifting
+	// by tens of milliseconds, which would restart the play clock forever.
+	onlyDurationUpdated := sameAsOld && absDuration(md.Duration-p.lastDuration) > durationTolerance
 
 	// A late duration update must not restart an already-qualified track
 	// (it would journal and commit a second scrobble).
@@ -283,7 +286,7 @@ func (tr *Tracker) playbackStateChanged(p *player, status mpris.PlaybackStatus, 
 		return
 	}
 
-	isPossiblyAtStart := position >= 0 && position < tr.startPosLimit
+	isPossiblyAtStart := p.lastDuration > 0 && position >= 0 && position <= tr.startPosLimit
 	stateChanged := p.lastPlayback != status
 
 	if !stateChanged && !(status == mpris.StatusPlaying && isPossiblyAtStart) {
@@ -308,7 +311,7 @@ func (tr *Tracker) playbackStateChanged(p *player, status mpris.PlaybackStatus, 
 				p.startedAt = tr.now()
 			}
 
-			if p.hash != p.lastScrobbleHash || (position >= 0 && isPossiblyAtStart) {
+			if p.hash != p.lastScrobbleHash || isPossiblyAtStart {
 				p.resetPlayClock(tr.now())
 			}
 
@@ -317,7 +320,7 @@ func (tr *Tracker) playbackStateChanged(p *player, status mpris.PlaybackStatus, 
 				tr.now().Sub(p.playStartTime) < tr.startPosLimit*2
 
 			if !armed &&
-				((position >= 0 && isPossiblyAtStart && p.scrobbled != stateQualified) ||
+				((isPossiblyAtStart && p.scrobbled != stateQualified) ||
 					(p.scrobbled < stateQualified && !positionSpam)) {
 				tr.arm(p)
 			}
