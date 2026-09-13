@@ -229,6 +229,9 @@ func (tr *Tracker) metadataChanged(p *player, md mpris.Metadata) {
 		p.urlHost = md.URLHost
 		p.hash = trackHash(md, p.appID, p.busName)
 		p.scrobbled = stateNone
+		if !sameAsOld {
+			p.timePlayed = 0 // a new track starts its own clock
+		}
 		if p.isPlaying {
 			p.playStartTime = tr.now()
 			p.startedAt = p.playStartTime

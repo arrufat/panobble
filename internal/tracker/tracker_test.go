@@ -39,6 +39,12 @@ func (f *fakeSubmitter) qualifiedCount() int {
 	return len(f.qualified)
 }
 
+func (f *fakeSubmitter) qualifiedTitle(title string) bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return slices.ContainsFunc(f.qualified, func(t scrobble.Track) bool { return t.Title == title })
+}
+
 func (f *fakeSubmitter) Scrobble(t scrobble.Track) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -297,6 +303,34 @@ func TestMultiPauseAccounting(t *testing.T) {
 	if got.Timestamp.Sub(t0) > 150*time.Millisecond {
 		t.Errorf("timestamp should be the original play start (t0+%v), not near a resume (t0+%v)",
 			got.Timestamp.Sub(t0), resumedAt.Sub(t0))
+	}
+}
+
+// Time played on one track must not shorten the next one's threshold. A
+// gapless change sends no playback-state event, so only metadataChanged
+// can reset the clock; the bug made the next track qualify at the floor.
+func TestTrackChangeResetsTimePlayed(t *testing.T) {
+	h := newHarness(t, nil)
+	h.tr.unknownDelay = 300 * time.Millisecond // threshold for this test
+
+	h.sendMetadata(testTrack)
+	h.sendStatus(mpris.StatusPlaying, 0)
+
+	// Pause and resume after ~250ms of the 300ms: that time is banked.
+	time.Sleep(250 * time.Millisecond)
+	h.sendStatus(mpris.StatusPaused, 60*time.Second)
+	time.Sleep(20 * time.Millisecond)
+	h.sendStatus(mpris.StatusPlaying, 60*time.Second)
+
+	// The next track starts while playback continues.
+	h.sendMetadata(mpris.Metadata{Artist: "Other", Title: "Next", Album: "Album"})
+
+	time.Sleep(200 * time.Millisecond)
+	if h.sub.qualifiedTitle("Next") {
+		t.Fatal("qualified too early: previous track's played time counted")
+	}
+	if !waitFor(t, time.Second, func() bool { return h.sub.qualifiedTitle("Next") }) {
+		t.Fatal("next track never qualified")
 	}
 }
 
