@@ -218,13 +218,14 @@ func (q *Queue) Flush(ctx context.Context, scrobblers []scrobble.Scrobbler) erro
 
 	now := q.now()
 	var keep []Pending
+	dirty := false // whether keep differs from the file on disk
 	eligible := make(map[string][]Pending)
 	for _, p := range all {
 		switch {
 		case p.Deferred:
 			keep = append(keep, p) // held for commit; never flushed
 		case now.Sub(p.Track.Timestamp) > maxAge:
-			// too old to submit: drop
+			dirty = true // too old to submit: drop
 		case byName[p.Service] == nil:
 			keep = append(keep, p) // service not configured
 		case p.CanForceRetry || now.Sub(p.LastFailed) > retryBackoff:
@@ -237,6 +238,9 @@ func (q *Queue) Flush(ctx context.Context, scrobblers []scrobble.Scrobbler) erro
 	var errs []error
 	for _, s := range scrobblers {
 		el := eligible[s.Name()]
+		if len(el) > 0 {
+			dirty = true // every eligible entry is submitted, dropped or restamped
+		}
 		sort.Slice(el, func(i, j int) bool {
 			return el[i].Track.Timestamp.Before(el[j].Track.Timestamp)
 		})
@@ -279,8 +283,10 @@ func (q *Queue) Flush(ctx context.Context, scrobblers []scrobble.Scrobbler) erro
 		}
 	}
 
-	if err := q.rewrite(keep); err != nil {
-		return err
+	if dirty {
+		if err := q.rewrite(keep); err != nil {
+			return err
+		}
 	}
 	return errors.Join(errs...)
 }

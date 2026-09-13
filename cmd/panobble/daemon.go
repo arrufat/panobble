@@ -11,10 +11,15 @@ import (
 
 	"github.com/arrufat/panobble/internal/clean"
 	"github.com/arrufat/panobble/internal/config"
-	"github.com/arrufat/panobble/internal/listenbrainz"
 	"github.com/arrufat/panobble/internal/mpris"
 	"github.com/arrufat/panobble/internal/tracker"
 )
+
+// tokenValidator is a backend holding a bare credential that no auth flow
+// confirmed, so it is worth checking at startup.
+type tokenValidator interface {
+	ValidateToken(ctx context.Context) (string, error)
+}
 
 func cmdDaemon(args []string) error {
 	log := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{
@@ -83,14 +88,14 @@ func cmdDaemon(args []string) error {
 	// Best-effort token check so a bad token surfaces at startup, not at the
 	// first scrobble.
 	for _, b := range targets {
-		if lb, ok := b.(*listenbrainz.Client); ok {
+		if v, ok := b.(tokenValidator); ok {
 			go func() {
 				vctx, cancel := context.WithTimeout(ctx, time.Minute)
 				defer cancel()
-				if user, err := lb.ValidateToken(vctx); err != nil {
-					log.Warn("listenbrainz token validation failed", "err", err)
+				if user, err := v.ValidateToken(vctx); err != nil {
+					log.Warn("token validation failed", "service", b.Name(), "err", err)
 				} else {
-					log.Info("listenbrainz token valid", "user", user)
+					log.Info("token valid", "service", b.Name(), "user", user)
 				}
 			}()
 		}

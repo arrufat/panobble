@@ -173,11 +173,8 @@ func (w *Watcher) Run() error {
 			w.owners[p.Owner] = p.BusName
 		}
 		if md, status, err := w.Snapshot(p.BusName); err == nil {
-			appID := NormalizeAppID(p.BusName)
-			w.events <- Event{BusName: p.BusName, AppID: appID, Metadata: &md,
-				Position: -1}
-			w.events <- Event{BusName: p.BusName, AppID: appID, Status: &status,
-				Position: w.Position(p.BusName), CanGoNext: w.CanGoNext(p.BusName)}
+			w.emitMetadata(p.BusName, md)
+			w.emitStatus(p.BusName, status)
 		}
 	}
 
@@ -188,6 +185,19 @@ func (w *Watcher) Run() error {
 	}
 	close(w.events)
 	return nil
+}
+
+// emitMetadata and emitStatus send the two event shapes. Only a status
+// event carries a position; metadata events use the -1 sentinel.
+func (w *Watcher) emitMetadata(busName string, md Metadata) {
+	w.events <- Event{BusName: busName, AppID: NormalizeAppID(busName),
+		Metadata: &md, Position: -1}
+}
+
+func (w *Watcher) emitStatus(busName string, status PlaybackStatus) {
+	w.events <- Event{BusName: busName, AppID: NormalizeAppID(busName),
+		Status: &status, Position: w.Position(busName),
+		CanGoNext: w.CanGoNext(busName)}
 }
 
 func (w *Watcher) handleSignal(sig *dbus.Signal) {
@@ -224,22 +234,17 @@ func (w *Watcher) handleSignal(sig *dbus.Signal) {
 			return
 		}
 		changed, _ := sig.Body[1].(map[string]dbus.Variant)
-		appID := NormalizeAppID(busName)
 
 		// Metadata first, then playback status; the tracker relies on this
 		// ordering.
 		if v, ok := changed["Metadata"]; ok {
 			if m, ok := v.Value().(map[string]dbus.Variant); ok {
-				md := metadataFromMap(m)
-				w.events <- Event{BusName: busName, AppID: appID, Metadata: &md,
-					Position: -1}
+				w.emitMetadata(busName, metadataFromMap(m))
 			}
 		}
 		if v, ok := changed["PlaybackStatus"]; ok {
 			if s, ok := v.Value().(string); ok {
-				status := ParsePlaybackStatus(s)
-				w.events <- Event{BusName: busName, AppID: appID, Status: &status,
-					Position: w.Position(busName), CanGoNext: w.CanGoNext(busName)}
+				w.emitStatus(busName, ParsePlaybackStatus(s))
 			}
 		}
 
