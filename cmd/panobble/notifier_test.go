@@ -177,10 +177,10 @@ func TestNotifierFetchesInfoBeforeFirstNotify(t *testing.T) {
 	waitFor(t, func() bool { return srv.count() == 1 })
 
 	got := srv.last()
-	if got.ReplacesID != 0 || got.Summary != "A — Alpha" {
+	if got.ReplacesID != 0 || got.Summary != "Alpha · ♥" {
 		t.Errorf("unexpected first notification: %+v", got)
 	}
-	if !strings.Contains(got.Body, "42 scrobbles") || !strings.Contains(got.Body, "♥ Loved") {
+	if !strings.Contains(got.Body, "42 scrobbles") || !strings.Contains(got.Body, "<b>A</b>") {
 		t.Errorf("body = %q", got.Body)
 	}
 	if len(got.Actions) != 4 || got.Actions[0] != "unlove" || got.Actions[2] != "open" {
@@ -239,7 +239,7 @@ func TestNotifierStaleInfoDiscarded(t *testing.T) {
 	lfm.infoGate <- struct{}{} // releases B's fetch
 	waitFor(t, func() bool { return srv.count() == 1 })
 	settle()
-	if srv.count() != 1 || srv.last().Summary != "B — Beta" {
+	if srv.count() != 1 || srv.last().Summary != "Beta" {
 		t.Errorf("stale info leaked: %+v", srv.notifs)
 	}
 }
@@ -259,7 +259,7 @@ func TestNotifierQualifiedAndLove(t *testing.T) {
 	lfm.loveGate <- struct{}{}
 	waitFor(t, func() bool { return srv.count() == 3 })
 	got := srv.last()
-	if got.Actions[0] != "unlove" || !strings.Contains(got.Body, "♥ Loved") {
+	if got.Actions[0] != "unlove" || !strings.HasSuffix(got.Summary, " · ♥") {
 		t.Errorf("love render: %+v", got)
 	}
 	if !slices.Equal(lfm.loves, []string{"love:Alpha"}) {
@@ -372,7 +372,7 @@ func TestNotifierNotifyFailureDropsPlay(t *testing.T) {
 	settle()
 	srv.setFail(false)
 	showTrack(t, n, nil, srv, trackB)
-	if got := srv.last(); got.ReplacesID != 0 || got.Summary != "B — Beta" {
+	if got := srv.last(); got.ReplacesID != 0 || got.Summary != "Beta" {
 		t.Errorf("a failed play must be forgotten, got %+v", got)
 	}
 }
@@ -420,15 +420,23 @@ func TestBuildNotification(t *testing.T) {
 		body    string
 		actions []string
 	}{
-		{"plain", shown{track: base}, false, "Simon & Garfunkel — <Sound>", "<i>A &amp; B</i>", nil},
+		{"plain", shown{track: base}, false, "<Sound>",
+			"by <b>Simon &amp; Garfunkel</b> on <i>A &amp; B</i>", nil},
 		{"qualified, loved, plural", shown{track: base, qualified: true, count: 2, loved: true}, true,
-			"✓ Simon & Garfunkel — <Sound>", "<i>A &amp; B</i> · 2 scrobbles · ♥ Loved", []string{"unlove", "♥ Unlove", "open", "Track page"}},
-		{"singular", shown{track: base, count: 1}, true,
-			"Simon & Garfunkel — <Sound>", "<i>A &amp; B</i> · 1 scrobble", []string{"love", "♡ Love", "open", "Track page"}},
-		{"no info", shown{track: scrobble.Track{Artist: "A", Title: "T"}}, true,
-			"A — T", "", []string{"love", "♡ Love", "open", "Track page"}},
+			"✓ <Sound> · ♥",
+			"by <b>Simon &amp; Garfunkel</b> on <i>A &amp; B</i> · 2 scrobbles",
+			[]string{"unlove", "♥ Unlove", "open", "Track page"}},
+		{"singular", shown{track: base, count: 1}, true, "<Sound>",
+			"by <b>Simon &amp; Garfunkel</b> on <i>A &amp; B</i> · 1 scrobble",
+			[]string{"love", "♡ Love", "open", "Track page"}},
+		{"no album, no info", shown{track: scrobble.Track{Artist: "A", Title: "T"}}, true, "T",
+			"by <b>A</b>", []string{"love", "♡ Love", "open", "Track page"}},
 	} {
-		got := buildNotification(&tc.s, tc.canLove, "icon", urgencyNormal)
+		n := &notifier{icon: "icon", urgency: urgencyNormal, markup: true}
+		if tc.canLove {
+			n.lfm = newFakeLastfm()
+		}
+		got := n.build(&tc.s)
 		if got.Summary != tc.summary {
 			t.Errorf("%s: summary = %q, want %q", tc.name, got.Summary, tc.summary)
 		}
@@ -449,8 +457,14 @@ func TestBuildNotification(t *testing.T) {
 		}
 	}
 
-	silent := buildNotification(&shown{track: base}, true, "icon", urgencyLow)
+	silent := (&notifier{icon: "icon", urgency: urgencyLow, markup: true}).build(&shown{track: base})
 	if silent.Hints["urgency"].Value() != urgencyLow {
 		t.Errorf("silent urgency = %v", silent.Hints["urgency"].Value())
+	}
+
+	// A server without body-markup gets the same text unadorned.
+	plain := (&notifier{icon: "icon", urgency: urgencyNormal}).build(&shown{track: base, count: 3})
+	if want := "by Simon & Garfunkel on A & B · 3 scrobbles"; plain.Body != want {
+		t.Errorf("plain body = %q, want %q", plain.Body, want)
 	}
 }

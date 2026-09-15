@@ -116,6 +116,13 @@ func (c *Client) Notify(ctx context.Context, n Notification) (uint32, error) {
 	return id, err
 }
 
+// Capabilities returns what the server supports, e.g. "body-markup".
+func (c *Client) Capabilities(ctx context.Context) ([]string, error) {
+	var caps []string
+	err := c.obj.CallWithContext(ctx, iface+".GetCapabilities", 0).Store(&caps)
+	return caps, err
+}
+
 // CloseNotification removes a notification.
 func (c *Client) CloseNotification(ctx context.Context, id uint32) error {
 	return c.obj.CallWithContext(ctx, iface+".CloseNotification", 0, id).Err

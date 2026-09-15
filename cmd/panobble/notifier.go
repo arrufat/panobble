@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -48,6 +49,7 @@ type notifier struct {
 	lfm       lastfmAPI    // nil when Last.fm is not configured
 	icon      string       // app icon: absolute path to the Last.fm logo, or a themed name
 	urgency   byte         // freedesktop urgency: 0 low (no banner on GNOME), 1 normal
+	markup    bool         // the server supports body markup
 	open      func(url string) error
 	log       *slog.Logger
 
@@ -73,6 +75,9 @@ const (
 	urgencyLow    byte = 0
 	urgencyNormal byte = 1
 
+	// Marks a scrobbled track in the summary; text presentation, never emoji.
+	glyphScrobbled = "✓"
+
 	notifyTimeout = 5 * time.Second
 	infoTimeout   = 5 * time.Second
 	loveTimeout   = 15 * time.Second
@@ -89,6 +94,7 @@ func newNotifier(cfg config.Notifications, lfm *lastfm.Client, dataDir string, l
 	}
 	n := newNotifierWith(client, nil, log)
 	n.closeConn = client.Close
+	n.markup = serverMarkup(client, log)
 	if cfg.Silent {
 		n.urgency = urgencyLow
 	}
@@ -115,6 +121,7 @@ func newNotifierWith(srv notifyServer, lfm lastfmAPI, log *slog.Logger) *notifie
 		lfm:     lfm,
 		icon:    "audio-x-generic",
 		urgency: urgencyNormal,
+		markup:  true,
 		open:    openBrowser,
 		log:     log,
 		cmds:    make(chan func(), 64),
@@ -122,6 +129,20 @@ func newNotifierWith(srv notifyServer, lfm lastfmAPI, log *slog.Logger) *notifie
 		ctx:     ctx,
 		cancel:  cancel,
 	}
+}
+
+// serverMarkup reports whether the server renders markup in the body.
+// Servers that do not would show the tags literally. A failed query keeps
+// markup on: every common server supports it.
+func serverMarkup(c *notify.Client, log *slog.Logger) bool {
+	ctx, cancel := context.WithTimeout(context.Background(), notifyTimeout)
+	defer cancel()
+	caps, err := c.Capabilities(ctx)
+	if err != nil {
+		log.Debug("querying notification capabilities failed", "err", err)
+		return true
+	}
+	return slices.Contains(caps, "body-markup")
 }
 
 // installIcon writes the embedded icon into dataDir and returns its path.
@@ -324,7 +345,7 @@ func (n *notifier) onClosed(id uint32, reason uint32) {
 func (n *notifier) render() {
 	ctx, cancel := context.WithTimeout(n.ctx, notifyTimeout)
 	defer cancel()
-	id, err := n.srv.Notify(ctx, buildNotification(n.cur, n.lfm != nil, n.icon, n.urgency))
+	id, err := n.srv.Notify(ctx, n.build(n.cur))
 	if err != nil {
 		n.log.Warn("showing notification failed", "err", err)
 		n.cur = nil
@@ -333,27 +354,32 @@ func (n *notifier) render() {
 	n.cur.id = id
 }
 
-// buildNotification formats the notification after upstream's Android
-// layout: "✓ Artist — Title", "Album · N scrobbles · ♥ Loved", actions.
-func buildNotification(s *shown, canLove bool, icon string, urgency byte) notify.Notification {
-	summary := s.track.Artist + " — " + s.track.Title
+// build formats the notification after upstream's Android layout:
+// "✓ Title · ♥" as the summary (the server renders it bold) over
+// "by Artist on Album · N scrobbles", with the actions. The check marks a
+// scrobbled track; a playing one is unmarked. Only the body takes markup:
+// the summary is plain text.
+func (n *notifier) build(s *shown) notify.Notification {
+	summary := s.track.Title
 	if s.qualified {
-		summary = "✓ " + summary
+		summary = glyphScrobbled + " " + summary
+	}
+	if s.loved {
+		summary += " · ♥"
 	}
 
-	var parts []string
+	line := "by " + n.bold(s.track.Artist)
 	if s.track.Album != "" {
-		parts = append(parts, "<i>"+notify.EscapeMarkup(s.track.Album)+"</i>")
+		line += " on " + n.italic(s.track.Album)
 	}
+	parts := []string{line}
 	if s.count > 0 {
 		parts = append(parts, fmt.Sprintf("%d %s", s.count, plural(s.count, "scrobble", "scrobbles")))
 	}
-	if s.loved {
-		parts = append(parts, "♥ Loved")
-	}
+	body := strings.Join(parts, " · ")
 
 	var actions []string
-	if canLove {
+	if n.lfm != nil {
 		if s.loved {
 			actions = []string{"unlove", "♥ Unlove"}
 		} else {
@@ -365,16 +391,29 @@ func buildNotification(s *shown, canLove bool, icon string, urgency byte) notify
 	// app_icon only; an image-path hint would add a second, large icon.
 	return notify.Notification{
 		ReplacesID: s.id,
-		AppIcon:    icon,
+		AppIcon:    n.icon,
 		Summary:    summary,
-		Body:       strings.Join(parts, " · "),
+		Body:       body,
 		Actions:    actions,
 		Hints: map[string]dbus.Variant{
 			"resident": dbus.MakeVariant(true),
-			"urgency":  dbus.MakeVariant(urgency),
+			"urgency":  dbus.MakeVariant(n.urgency),
 		},
 		Timeout: -1,
 	}
+}
+
+// bold and italic mark up body text, escaping it; on a server without
+// markup support the text is left as it is.
+func (n *notifier) bold(s string) string { return n.wrap(s, "b") }
+
+func (n *notifier) italic(s string) string { return n.wrap(s, "i") }
+
+func (n *notifier) wrap(s, tag string) string {
+	if !n.markup {
+		return s
+	}
+	return "<" + tag + ">" + notify.EscapeMarkup(s) + "</" + tag + ">"
 }
 
 func plural(n int, one, many string) string {
