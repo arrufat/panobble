@@ -657,3 +657,50 @@ func TestRealDurationUpdateStillRearms(t *testing.T) {
 		t.Errorf("scrobbled duration = %v, want 4m", got.Duration)
 	}
 }
+
+// Seeking back to the start while paused emits no Seeked the tracker acts
+// on; resuming at position ~0 must still commit the first play and start a
+// second one.
+func TestReplayOnResumeAtStart(t *testing.T) {
+	h := newHarness(t, fastDelay)
+	md := testTrack
+	md.Duration = 4 * time.Minute
+	h.sendMetadata(md)
+	h.sendStatus(mpris.StatusPlaying, 0)
+	if !waitFor(t, time.Second, func() bool { return h.sub.qualifiedCount() == 1 }) {
+		t.Fatal("first play never qualified")
+	}
+
+	h.sendStatus(mpris.StatusPaused, 2*time.Minute)
+	h.sendStatus(mpris.StatusPlaying, 0)
+	if !waitFor(t, time.Second, func() bool { _, s := h.sub.counts(); return s == 1 }) {
+		t.Fatal("first play not committed on replay")
+	}
+	if !waitFor(t, time.Second, func() bool { return h.sub.qualifiedCount() == 2 }) {
+		t.Fatal("replay never qualified")
+	}
+
+	h.sendStatus(mpris.StatusStopped, -1)
+	if !waitFor(t, time.Second, func() bool { _, s := h.sub.counts(); return s == 2 }) {
+		t.Fatal("replay not committed")
+	}
+}
+
+// Resuming mid-track after qualifying is not a replay.
+func TestResumeMidTrackIsNotReplay(t *testing.T) {
+	h := newHarness(t, fastDelay)
+	md := testTrack
+	md.Duration = 4 * time.Minute
+	h.sendMetadata(md)
+	h.sendStatus(mpris.StatusPlaying, 0)
+	if !waitFor(t, time.Second, func() bool { return h.sub.qualifiedCount() == 1 }) {
+		t.Fatal("never qualified")
+	}
+
+	h.sendStatus(mpris.StatusPaused, 2*time.Minute)
+	h.sendStatus(mpris.StatusPlaying, 2*time.Minute)
+	time.Sleep(100 * time.Millisecond)
+	if _, s := h.sub.counts(); s != 0 || h.sub.qualifiedCount() != 1 {
+		t.Fatalf("mid-track resume treated as replay: scrobbles=%d qualified=%d", s, h.sub.qualifiedCount())
+	}
+}

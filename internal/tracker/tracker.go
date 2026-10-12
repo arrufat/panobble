@@ -196,11 +196,7 @@ func (tr *Tracker) handleMprisEvent(ev mpris.Event) {
 		// and allow rescrobbling.
 		if *ev.SeekedTo < tr.startPosLimit && p.isPlaying &&
 			p.scrobbled >= stateQualified && p.scrobbled != stateCancelled {
-			tr.commit(p)
-			p.cleaned = scrobble.Track{}
-			p.resetPlayClock(tr.now())
-			p.scrobbled = stateNone
-			tr.arm(p)
+			tr.replay(p)
 		}
 	}
 }
@@ -305,6 +301,12 @@ func (tr *Tracker) playbackStateChanged(p *player, status mpris.PlaybackStatus, 
 		tr.pause(p)
 
 	case mpris.StatusPlaying:
+		// Resuming at the start of a qualified play is a replay too, e.g.
+		// seeked back while paused, where Seeked was ignored.
+		if isPossiblyAtStart && p.scrobbled == stateQualified && p.hash == p.lastScrobbleHash {
+			tr.replay(p)
+			break
+		}
 		if p.scrobbled < stateCancelled {
 			p.isPlaying = true
 			if p.playStartTime.IsZero() {
@@ -331,6 +333,16 @@ func (tr *Tracker) playbackStateChanged(p *player, status mpris.PlaybackStatus, 
 	}
 
 	p.lastPlayback = status
+}
+
+// replay commits the finished play and re-arms the same track from scratch,
+// re-running cleanup and now-playing.
+func (tr *Tracker) replay(p *player) {
+	tr.commit(p)
+	p.cleaned = scrobble.Track{}
+	p.resetPlayClock(tr.now())
+	p.scrobbled = stateNone
+	tr.arm(p)
 }
 
 // pause accumulates played time if a scrobble was pending and cancels the
