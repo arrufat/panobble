@@ -25,9 +25,9 @@
     },
     {
       "name": "album_ver",
-      "_note": "diverges from upstream like 'remastered': a dash/slash-separated suffix inside brackets keeps its closing bracket via $2",
+      "_note": "diverges from upstream like 'remastered': a dash/slash-separated suffix inside brackets keeps its closing bracket via $2. Also diverges by accepting a slash-joined qualifier after album ('Album/EP Version', 'Album/Single Version')",
       "fields": ["track"],
-      "pattern": "^(.*) (?:[(\\[](?:.+ )?album (?:.*?version|edit(?:ed)?).*?[)\\]]?$|(?:- |\\/)(?:.+ )?album (?:.*?version|edit(?:ed)?)(?:[^()\\[\\]]*?([)\\]])|.*?)$)",
+      "pattern": "^(.*) (?:[(\\[](?:.+ )?album(?:/[^\\s()\\[\\]]+)? (?:.*?version|edit(?:ed)?).*?[)\\]]?$|(?:- |\\/)(?:.+ )?album(?:/[^\\s()\\[\\]]+)? (?:.*?version|edit(?:ed)?)(?:[^()\\[\\]]*?([)\\]])|.*?)$)",
       "replacement": "$1$2"
     }
   ]

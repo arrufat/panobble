@@ -82,6 +82,8 @@ func TestPresetAlbumVer(t *testing.T) {
 	}
 	cases := []struct{ in, want string }{
 		{"Song (Album Version)", "Song"},
+		{"Song (Album/EP Version)", "Song"},
+		{"Song - Album/Single Version", "Song"},
 		{"Song - album version", "Song"},
 		{"Song (2004 Album Edit)", "Song"},
 		{`Song (7" Mix - Album Version)`, `Song (7" Mix)`},
