@@ -15,8 +15,8 @@ func TestLoadMissingFileGivesDefaults(t *testing.T) {
 		cfg.Scrobble.MinDurationSecs != 30 || !cfg.Scrobble.NowPlaying {
 		t.Errorf("unexpected defaults: %+v", cfg.Scrobble)
 	}
-	if len(cfg.Cleanup.Presets) != 5 {
-		t.Errorf("expected 5 default presets, got %v", cfg.Cleanup.Presets)
+	if len(cfg.Cleanup.Presets) != 6 {
+		t.Errorf("expected 6 default presets, got %v", cfg.Cleanup.Presets)
 	}
 	if !cfg.Players.RequireAlbum {
 		t.Error("require_album should default to true")

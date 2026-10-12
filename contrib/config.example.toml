@@ -47,7 +47,7 @@ silent = false
 # parse_title_with_fallback: same on music.youtube.com, keeps the original
 #                            title when parsing fails.
 # remastered / explicit / single_ep / album_ver: strip those suffixes.
-presets = ["parse_title", "parse_title_with_fallback", "remastered", "explicit", "single_ep"]
+presets = ["parse_title", "parse_title_with_fallback", "remastered", "explicit", "single_ep", "album_ver"]
 # Extra apps (beyond the YouTube hosts) whose titles should be parsed.
 parse_title_apps = []
 

@@ -74,12 +74,7 @@ func TestPresetExplicit(t *testing.T) {
 }
 
 func TestPresetAlbumVer(t *testing.T) {
-	cleanup := config.Default().Cleanup
-	cleanup.Presets = append(cleanup.Presets, "album_ver")
-	p, err := NewPipeline(cleanup, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
+	p := defaultPipeline(t)
 	cases := []struct{ in, want string }{
 		{"Song (Album Version)", "Song"},
 		{"Song (Album/EP Version)", "Song"},

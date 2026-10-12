@@ -88,7 +88,7 @@ func Default() Config {
 		Cleanup: Cleanup{
 			Presets: []string{
 				"parse_title", "parse_title_with_fallback",
-				"remastered", "explicit", "single_ep",
+				"remastered", "explicit", "single_ep", "album_ver",
 			},
 		},
 	}
